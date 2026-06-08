@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title> error de usuario 0N1+  — PURGATORIO N TEMPLE OS 2</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;background:#000;overflow:hidden;touch-action:none}
+#video{position:fixed;top:-9999px;left:-9999px;width:1px;height:1px}
+#matrix-canvas{position:fixed;top:0;left:0;width:100%;height:100%;z-index:1}
+#start{
+  position:fixed;top:0;left:0;width:100%;height:100%;
+  background:#000;z-index:100;
+  display:flex;flex-direction:column;
+  align-items:center;justify-content:center;
+  gap:28px;cursor:pointer;font-family:'Courier New',monospace;
+}
+#start-haiku{font-size:clamp(13px,3.5vw,17px);color:#fff;line-height:2.4;text-align:center;letter-spacing:0.05em}
+#start-haiku .red{color:#e00;font-weight:700}
+#start-sub{
+  font-size:16px;
+  color:#fff;
+  letter-spacing:0.4em;
+  text-align:center;
+  opacity:0.85;
+}
+#start-btn{font-family:'Courier New',monospace;font-size:14px;color:#000;background:#e00;padding:12px 32px;letter-spacing:0.3em;border:none;cursor:pointer}
+</style>
+</head>
+<body>
+
+<div id="start">
+  <div id="start-haiku">
+    <span class="red">¿Qué harías tú</span><br>
+    <span class="red">en una revolución?</span><br>
+    <span class="red">¡Levántate!</span><br>
+    <span class="red">Nadie te salvará</span>
+  </div>
+  <button id="start-btn" onclick="iniciar()">INICIAR</button>
+
+<div id="artist-tag">ON1</div>
+
+<div id="start-sub">{ PURGATORIO N TEMPLE OS 2 } · ON1 · MUSEO DEL BARRO · METEPEC 2026</div>
+
+</div>
+
+
+<video id="video" autoplay muted playsinline></video>
+<canvas id="matrix-canvas"></canvas>
+<canvas id="sample-canvas" style="display:none"></canvas>
+
+<script>
+// ─── AUDIO ENGINE — MP3 PLAYBACK ─────────────────────────────────────────────
+// Reproduce levantate_-_los_crudos.mp3 en loop
+// El volumen del ruido reacciona al movimiento de la cámara (igual que antes)
+
+let audioCtx, masterGain, noiseGain, noiseMotionTarget = 0.022;
+let audioReady = false;
+
+function initAudio() {
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+  masterGain = audioCtx.createGain();
+  masterGain.gain.setValueAtTime(0, audioCtx.currentTime);
+  masterGain.gain.linearRampToValueAtTime(0.85, audioCtx.currentTime + 2);
+  masterGain.connect(audioCtx.destination);
+
+  // ── MP3 principal — Los Crudos: Levántate ────────────────────────────────
+  const song = new Audio('levantate_-_los_crudos.mp3');
+  song.loop = true;
+  song.volume = 1;
+  const songSource = audioCtx.createMediaElementSource(song);
+  songSource.connect(masterGain);
+  song.play().catch(() => {});
+
+  // ── Ruido textural de fondo — reacciona al movimiento (muy sutil) ─────────
+  const bufSize = audioCtx.sampleRate * 4;
+  const buf = audioCtx.createBuffer(1, bufSize, audioCtx.sampleRate);
+  const d = buf.getChannelData(0);
+  for (let i = 0; i < bufSize; i++) d[i] = Math.random() * 2 - 1;
+  const noiseSrc = audioCtx.createBufferSource();
+  noiseSrc.buffer = buf; noiseSrc.loop = true;
+
+  const lp = audioCtx.createBiquadFilter();
+  lp.type = 'lowpass'; lp.frequency.value = 400; lp.Q.value = 0.8;
+
+  noiseGain = audioCtx.createGain();
+  noiseGain.gain.value = 0;
+  noiseSrc.connect(lp); lp.connect(noiseGain); noiseGain.connect(masterGain);
+  noiseSrc.start();
+
+  audioReady = true;
+}
+
+
+
+function updateAudioMotion(motion) {
+  if (!audioCtx || !noiseGain) return;
+  noiseGain.gain.setTargetAtTime(
+    0.016 + motion * 0.055,
+    audioCtx.currentTime, 0.4
+  );
+}
+
+// ─── MATRIX ENGINE ───────────────────────────────────────────────────────────
+const canvas = document.getElementById('matrix-canvas');
+const ctx = canvas.getContext('2d');
+const video = document.getElementById('video');
+const sampleCanvas = document.getElementById('sample-canvas');
+const sampleCtx = sampleCanvas.getContext('2d');
+
+let W, H, cols, rows, fontSize, cw;
+let cells = [];
+let activePhrases = [];
+let motionLevel = 0;
+let prevFrame = null;
+let cameraActive = false;
+let pixelData = null;
+let sampleW = 120, sampleH = 90;
+
+const CHARS = '01アイウエオカキクケコABCDEFGHIJKLMNOPQRSTUVWXYZ?!@#$%&[]{}01110100';
+const BRIGHT_CHARS = '@#%&WMB80';
+
+const ALL_PHRASES = [
+  // Los Crudos — Levántate
+  '¿Qué harías tú en una revolución?',
+  '¿Qué estás preparando para hacer en una dictadura?',
+  '¿Qué vas a hacer cuando torturen a tu hermano?',
+  '¿Qué, no harás nada hasta que maten a tu madre?',
+  '¡Levántate!',
+  'Que estás perdiendo el tempio',
+  'Infórmate y actúa',
+  'Nadie te salvará',
+  'Te esperas hasta que llegue el día',
+  'En que tu vecino te eche a los milicos',
+  'Y todo tu dinero pierda su valor',
+  'Y conviertan a tu casa en tu prisión',
+  'Después será demasiado tarde',
+  'No te olvides que la libertad no es gratis',
+  'Jamás digas que nunca va a pasar aquí',
+  'No pienses que el mundo está tan lejos',
+  'Siempre pueden, siempre te pueden encontrar',
+];
+
+function resize() {
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+  fontSize = Math.max(13, Math.min(17, W / 38));
+  cw = fontSize * 0.62;
+  cols = Math.floor(W / cw);
+  rows = Math.floor(H / fontSize) + 1;
+  sampleCanvas.width = sampleW;
+  sampleCanvas.height = sampleH;
+  buildGrid();
+}
+
+function randChar() { return CHARS[Math.floor(Math.random() * CHARS.length)]; }
+function randBright() { return BRIGHT_CHARS[Math.floor(Math.random() * BRIGHT_CHARS.length)]; }
+
+function buildGrid() {
+  cells = [];
+  for (let r = 0; r < rows; r++) {
+    cells[r] = [];
+    for (let c = 0; c < cols; c++) {
+      cells[r][c] = { ch: randChar(), timer: Math.random() * 20 };
+    }
+  }
+  activePhrases = [];
+}
+
+function sampleVideo() {
+  if (!cameraActive || video.readyState < 2) return null;
+  sampleCtx.drawImage(video, 0, 0, sampleW, sampleH);
+  return sampleCtx.getImageData(0, 0, sampleW, sampleH).data;
+}
+
+function getPixelBrightness(r, c) {
+  if (!pixelData) return 0;
+  const px = Math.floor((c / cols) * sampleW);
+  const py = Math.floor((r / rows) * sampleH);
+  const mirroredPx = sampleW - 1 - px;
+  const idx = (py * sampleW + mirroredPx) * 4;
+  let luma = pixelData[idx] * 0.299 + pixelData[idx+1] * 0.587 + pixelData[idx+2] * 0.114;
+  luma = (luma - 128) * 1.8 + 128;
+  return Math.max(0, Math.min(255, luma)) / 255;
+}
+
+function detectMotion(frame) {
+  let diff = 0;
+  if (prevFrame && frame) {
+    for (let i = 0; i < frame.length; i += 4) diff += Math.abs(frame[i] - prevFrame[i]);
+    diff /= (sampleW * sampleH * 255);
+  }
+  if (frame) prevFrame = new Uint8ClampedArray(frame);
+  return Math.min(diff * 14, 1);
+}
+
+function spawnPhrase() {
+  const phrase = ALL_PHRASES[Math.floor(Math.random() * ALL_PHRASES.length)];
+  const chars = phrase.split('');
+  const randomRow = Math.floor(Math.random() * rows);
+  const randomCol = Math.floor(Math.random() * Math.max(1, cols - chars.length - 1));
+  activePhrases.push({
+    chars, r: randomRow, c: randomCol,
+    born: Date.now(),
+    life: 4500 + Math.random() * 2500,
+    drift: (Math.random() - 0.5) * 0.06,
+    fr: randomRow + (Math.random() - 0.5) * 18,
+  });
+}
+
+function updatePhrases(motion) {
+  const now = Date.now();
+  activePhrases = activePhrases.filter(p => now - p.born < p.life);
+  if (motion > 0.002 && activePhrases.length < 14 && Math.random() < 0.42) spawnPhrase();
+  activePhrases.forEach(p => {
+    p.r += (p.fr - p.r) * 0.012 + p.drift * motion * 10;
+    p.r = Math.max(0, Math.min(rows - 1, p.r));
+  });
+}
+
+function getRedChar(r, c) {
+  for (let p of activePhrases) {
+    const age = Date.now() - p.born;
+    if (age / p.life > 0.95) continue;
+    if (Math.round(p.r) !== r) continue;
+    const ci = c - p.c;
+    if (ci >= 0 && ci < p.chars.length) return p.chars[ci];
+  }
+  return null;
+}
+
+function draw() {
+  ctx.fillStyle = 'rgba(0,0,0,0.08)';
+  ctx.fillRect(0, 0, W, H);
+  ctx.font = `${fontSize}px "Courier New", monospace`;
+
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const cell = cells[r][c];
+      cell.timer -= 1;
+      const bright = getPixelBrightness(r, c);
+      const isBody = bright > 0.32;
+
+      if (cell.timer <= 0) {
+        cell.ch = isBody ? randBright() : randChar();
+        cell.timer = isBody ? (4 + Math.random() * 10) : (10 + Math.random() * 34);
+      }
+
+      const red = getRedChar(r, c);
+      if (red !== null) {
+        ctx.fillStyle = '#ff2a2a';
+        ctx.shadowBlur = 5;
+        ctx.shadowColor = '#ff0000';
+        ctx.fillText(red, c * cw, r * fontSize);
+        ctx.shadowBlur = 0;
+      } else if (isBody) {
+        const alpha = 0.18 + bright * 0.35;
+        ctx.fillStyle = `rgba(255,255,255,${alpha})`;
+        ctx.shadowBlur = 2;
+        ctx.shadowColor = 'rgba(255,255,255,0.5)';
+        ctx.fillText(cell.ch, c * cw, r * fontSize);
+        ctx.shadowBlur = 0;
+      } else {
+        ctx.fillStyle = `rgba(255,255,255,${0.03 + Math.random() * 0.08})`;
+        ctx.fillText(cell.ch, c * cw, r * fontSize);
+      }
+    }
+  }
+}
+
+function loop() {
+  pixelData = sampleVideo();
+  const raw = detectMotion(pixelData);
+  motionLevel += (raw - motionLevel) * 0.18;
+  updateAudioMotion(motionLevel);
+  updatePhrases(motionLevel);
+  draw();
+  requestAnimationFrame(loop);
+}
+
+async function iniciar() {
+  document.getElementById('start').style.display = 'none';
+
+  // Init audio — must happen on user gesture
+  try { initAudio(); } catch(e) {}
+
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
+      audio: false
+    });
+    video.srcObject = stream;
+    await video.play();
+    cameraActive = true;
+  } catch(e) {
+    cameraActive = false;
+    setInterval(() => { motionLevel = 0.05 + Math.random() * 0.3; }, 2500);
+  }
+
+  resize();
+  loop();
+}
+
+window.addEventListener('resize', resize);
+resize();
+</script>
+</body>
+</html>
