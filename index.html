@@ -167,8 +167,8 @@ function drawLines(fxCtx, now) {
 
   // ── PASO 1: Channel shift — separar RGB y desplazarlos ───────────────────
   // Extraer canales por separado y desplazarlos horizontalmente
-  const shiftR = Math.floor(Math.sin(t * 1.3) * 18 + Math.random() * 12);
-  const shiftB = Math.floor(Math.cos(t * 0.9) * 22 + Math.random() * 8);
+  const shiftR = Math.floor(Math.sin(t * 1.3) * 55 + Math.random() * 35);
+  const shiftB = Math.floor(Math.cos(t * 0.9) * 65 + Math.random() * 28);
   const shifted = new Uint8ClampedArray(data.length);
 
   for (let y = 0; y < capH; y++) {
@@ -190,7 +190,7 @@ function drawLines(fxCtx, now) {
   // ── PASO 2: Pixel sorting por filas — ordena pixeles por brillo ──────────
   // Solo en algunas filas para que no se vea estático
   const sortedData = new Uint8ClampedArray(shifted);
-  const numSortRows = Math.floor(capH * 0.35); // 35% de filas se sortean
+  const numSortRows = Math.floor(capH * 0.75); // 75% de filas se sortean
   for (let si = 0; si < numSortRows; si++) {
     const y = Math.floor(Math.random() * capH);
     // Extraer fila
@@ -202,7 +202,7 @@ function drawLines(fxCtx, now) {
     }
     // Ordenar segmento aleatorio por brillo
     const start = Math.floor(Math.random() * capW * 0.5);
-    const len   = Math.floor(capW * (0.1 + Math.random() * 0.5));
+    const len   = Math.floor(capW * (0.3 + Math.random() * 0.7));
     const seg   = row.slice(start, start + len).sort((a,b) => a.luma - b.luma);
     for (let x = 0; x < seg.length; x++) {
       const i = (y * capW + start + x) * 4;
@@ -216,14 +216,14 @@ function drawLines(fxCtx, now) {
   // ── PASO 3: Block displacement — bloques de píxeles desplazados ──────────
   // Como datamosh de video: copiar bloques de posiciones aleatorias
   const blockData = new Uint8ClampedArray(sortedData);
-  const numBlocks = 8 + Math.floor(Math.random() * 18);
+  const numBlocks = 20 + Math.floor(Math.random() * 28);
   for (let b = 0; b < numBlocks; b++) {
     const bx  = Math.floor(Math.random() * (capW - 60));
     const by  = Math.floor(Math.random() * (capH - 20));
-    const bw  = 20 + Math.floor(Math.random() * 80);
-    const bh  = 2  + Math.floor(Math.random() * 18);
-    const dx  = Math.floor((Math.random() - 0.5) * capW * 0.25);
-    const dy  = Math.floor((Math.random() - 0.5) * capH * 0.08);
+    const bw  = 40 + Math.floor(Math.random() * 180);
+    const bh  = 4  + Math.floor(Math.random() * 40);
+    const dx  = Math.floor((Math.random() - 0.5) * capW * 0.7);
+    const dy  = Math.floor((Math.random() - 0.5) * capH * 0.25);
     // Copiar bloque con offset
     for (let ry = 0; ry < bh; ry++) {
       const sy = Math.min(capH-1, by + ry);
@@ -234,9 +234,9 @@ function drawLines(fxCtx, now) {
         const si2 = (sy * capW + sx) * 4;
         const ti  = (ty * capW + tx) * 4;
         // Mezcla con colores alterados — aquí entra el color saturado
-        blockData[ti]   = Math.min(255, sortedData[si2] * 1.8);
-        blockData[ti+1] = Math.min(255, sortedData[si2+1] * 0.6);
-        blockData[ti+2] = Math.min(255, sortedData[si2+2] * 2.2);
+        blockData[ti]   = Math.min(255, sortedData[si2] * 3.2);
+        blockData[ti+1] = Math.min(255, sortedData[si2+1] * 0.3);
+        blockData[ti+2] = Math.min(255, sortedData[si2+2] * 3.8);
         blockData[ti+3] = 255;
       }
     }
@@ -248,7 +248,7 @@ function drawLines(fxCtx, now) {
     const r = blockData[i], g = blockData[i+1], b = blockData[i+2];
     // Saturar canales
     const maxC = Math.max(r, g, b);
-    const boost = 1.6;
+    const boost = 2.4;
     blockData[i]   = Math.min(255, r * boost);
     blockData[i+1] = Math.min(255, g * boost);
     blockData[i+2] = Math.min(255, b * boost);
@@ -266,7 +266,7 @@ function drawLines(fxCtx, now) {
 
   // Mezclar con acumulación previa (frame ghosting)
   if (dmPrevFrame) {
-    fxCtx.globalAlpha = 0.35;
+    fxCtx.globalAlpha = 0.62;
     fxCtx.globalCompositeOperation = 'screen';
     fxCtx.drawImage(dmPrevFrame, 0, 0, W, H);
     fxCtx.globalAlpha = 1;
@@ -274,20 +274,20 @@ function drawLines(fxCtx, now) {
   }
 
   // ── PASO 5: Horizontal glitch strips — franjas desplazadas sobre render ───
-  const numStrips = 4 + Math.floor(Math.random() * 10);
+  const numStrips = 10 + Math.floor(Math.random() * 18);
   for (let s = 0; s < numStrips; s++) {
-    if (Math.random() > 0.6) continue;
+    if (Math.random() > 0.75) continue;
     const sy  = Math.floor(Math.random() * H);
-    const sh  = 1 + Math.floor(Math.random() * 12);
-    const sdx = (Math.random() - 0.5) * W * 0.18;
+    const sh  = 1 + Math.floor(Math.random() * 28);
+    const sdx = (Math.random() - 0.5) * W * 0.45;
     fxCtx.drawImage(fxCtx.canvas, 0, sy, W, sh, sdx, sy, W, sh);
   }
 
   // ── Color aberration flash — destello de color sobre toda la pantalla ─────
-  if (Math.random() < 0.05) {
+  if (Math.random() < 0.18) {
     const flashColors = [
-      'rgba(255,0,200,0.12)', 'rgba(0,255,80,0.1)',
-      'rgba(255,220,0,0.1)',  'rgba(0,200,255,0.1)'
+      'rgba(255,0,200,0.28)', 'rgba(0,255,80,0.22)',
+      'rgba(255,220,0,0.25)', 'rgba(0,200,255,0.22)'
     ];
     fxCtx.fillStyle = flashColors[Math.floor(Math.random() * flashColors.length)];
     fxCtx.fillRect(0, 0, W, H);
@@ -633,9 +633,9 @@ function _drawCRTOverlay(fxCtx, now) {
   const t = now * 0.001;
 
   // ── Scanlines — líneas oscuras cada 2px, efecto tubo CRT ─────────────────
-  for (let y = 0; y < H; y += 2) {
-    fxCtx.fillStyle = 'rgba(0,0,0,0.38)';
-    fxCtx.fillRect(0, y, W, 1);
+  for (let y = 0; y < H; y += 4) {
+    fxCtx.fillStyle = 'rgba(0,0,0,0.82)';
+    fxCtx.fillRect(0, y, W, 2);
   }
 
   // ── Barrido vertical (refresh line) — línea brillante que sube ───────────
