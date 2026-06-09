@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>error de usuario 0N1+</title>
+<title>error de usuario 0N1+ — PURGATORIO N TEMPLE OS 2</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 html,body{width:100%;height:100%;background:#000;overflow:hidden;touch-action:none}
@@ -26,11 +26,11 @@ html,body{width:100%;height:100%;background:#000;overflow:hidden;touch-action:no
 <body>
 
 <div id="start">
-  <div id="start-haiku">
-    <span class="red">0000000</span><br>
-    <span class="red">1010101</span><br>
-    <span class="red">0101010</span><br>
-    <span class="red">1111111</span>
+  <div id="start-haiku" id="binary-haiku">
+    <span class="red">000000</span><br>
+    <span class="red">101010</span><br>
+    <span class="red">111111</span><br>
+    <span class="red">010101</span>
   </div>
   <button id="start-btn" onclick="iniciar()">INICIAR</button>
   <div style="font-family:'Courier New',monospace;font-size:11px;color:#e00;letter-spacing:0.3em">ON1</div>
@@ -128,80 +128,106 @@ function triggerMode(nivel) {
 // ─── MODO LEVE: cámara rojo/negro + matrix encima ─────────────────────────────
 // (se dibuja directo en el matrix canvas con compositing)
 
-// ─── MODO MEDIO: líneas rojas desde silueta ───────────────────────────────────
-let redLines = [];
-
-function buildLines() {
-  redLines = [];
-  // Se generan en drawLines() cuando hay pixelData
-}
+// ─── MODO MEDIO: cámara duplicada + wireframe verde neón ─────────────────────
+function buildLines() {} // no necesita init
 
 function drawLines(fxCtx, now) {
   fxCtx.clearRect(0, 0, W, H);
-  if (!pixelData) return;
+  if (!cameraActive || video.readyState < 2) return;
 
   const progress = 1 - (modeUntil - now) / 3000;
-  const alpha    = Math.sin(progress * Math.PI);
+  const pulse    = 0.6 + Math.sin(now * 0.008) * 0.4;
 
-  // Fondo semitransparente
-  fxCtx.fillStyle = `rgba(0,0,0,${0.55 * alpha})`;
-  fxCtx.fillRect(0, 0, W, H);
+  // ── 1. Cámara duplicada con offset (3 capas) ──────────────────────────────
+  const offsets = [
+    { dx: -W * 0.08, dy: -H * 0.04, alpha: 0.25, hue: 'rgba(0,255,80,' },
+    { dx:  W * 0.08, dy:  H * 0.04, alpha: 0.25, hue: 'rgba(0,200,255,' },
+    { dx:  0,        dy:  0,        alpha: 0.45, hue: null },
+  ];
 
-  // Detectar puntos brillantes de la silueta como origen de líneas
-  const origins = [];
-  const stepX = Math.floor(sampleW / 12);
-  const stepY = Math.floor(sampleH / 16);
+  for (const o of offsets) {
+    fxCtx.save();
+    fxCtx.globalAlpha = o.alpha;
+    if (o.hue) {
+      // Tinte de color sobre la cámara
+      fxCtx.scale(-1, 1);
+      fxCtx.drawImage(video, -(W + o.dx), o.dy, W, H);
+      fxCtx.globalCompositeOperation = 'screen';
+      fxCtx.fillStyle = o.hue + '0.3)';
+      fxCtx.fillRect(-W + o.dx, o.dy, W, H);
+    } else {
+      fxCtx.scale(-1, 1);
+      fxCtx.drawImage(video, -W, 0, W, H);
+    }
+    fxCtx.restore();
+    fxCtx.globalAlpha = 1;
+    fxCtx.globalCompositeOperation = 'source-over';
+  }
+
+  // ── 2. Extraer puntos de la silueta para el wireframe ─────────────────────
+  const pts = [];
+  const stepX = Math.floor(sampleW / 18);
+  const stepY = Math.floor(sampleH / 24);
 
   for (let py = 0; py < sampleH; py += stepY) {
     for (let px = 0; px < sampleW; px += stepX) {
-      const mx  = sampleW - 1 - px;
-      const idx = (py * sampleW + mx) * 4;
-      const luma = pixelData[idx]*0.299 + pixelData[idx+1]*0.587 + pixelData[idx+2]*0.114;
-      if (luma > 60) {
-        origins.push({
+      const mx   = sampleW - 1 - px;
+      const idx  = (py * sampleW + mx) * 4;
+      const luma = pixelData
+        ? pixelData[idx]*0.299 + pixelData[idx+1]*0.587 + pixelData[idx+2]*0.114
+        : 0;
+      if (luma > 45) {
+        pts.push({
           x: (px / sampleW) * W,
           y: (py / sampleH) * H,
+          l: luma,
         });
       }
     }
   }
 
-  if (origins.length === 0) return;
+  if (pts.length === 0) return;
 
-  // Desde cada origen: líneas hacia esquinas y puntos aleatorios
-  const targets = [
-    {x: 0, y: 0}, {x: W, y: 0}, {x: 0, y: H}, {x: W, y: H},
-    {x: W/2, y: 0}, {x: W/2, y: H}, {x: 0, y: H/2}, {x: W, y: H/2},
-  ];
+  // ── 3. Wireframe: conectar puntos cercanos ────────────────────────────────
+  const maxDist = W * 0.12;
+  fxCtx.shadowBlur  = 8;
+  fxCtx.shadowColor = '#00ff50';
 
-  fxCtx.shadowBlur  = 6;
-  fxCtx.shadowColor = '#ff0000';
-
-  for (let o of origins) {
-    const count = 3 + Math.floor(Math.random() * 4);
-    for (let i = 0; i < count; i++) {
-      const t = targets[Math.floor(Math.random() * targets.length)];
-      const jx = t.x + (Math.random()-0.5) * W * 0.3;
-      const jy = t.y + (Math.random()-0.5) * H * 0.3;
-      const a  = (0.15 + Math.random() * 0.45) * alpha;
-      fxCtx.strokeStyle = `rgba(255,${Math.floor(Math.random()*30)},${Math.floor(Math.random()*30)},${a})`;
-      fxCtx.lineWidth   = 0.5 + Math.random() * 1.5;
-      fxCtx.beginPath();
-      fxCtx.moveTo(o.x, o.y);
-      fxCtx.lineTo(jx, jy);
-      fxCtx.stroke();
+  for (let i = 0; i < pts.length; i++) {
+    for (let j = i + 1; j < pts.length; j++) {
+      const dx   = pts[i].x - pts[j].x;
+      const dy   = pts[i].y - pts[j].y;
+      const dist = Math.sqrt(dx*dx + dy*dy);
+      if (dist < maxDist) {
+        const a = (1 - dist / maxDist) * 0.7 * pulse;
+        fxCtx.strokeStyle = `rgba(0,255,80,${a})`;
+        fxCtx.lineWidth   = dist < maxDist * 0.4 ? 1.2 : 0.5;
+        fxCtx.beginPath();
+        fxCtx.moveTo(pts[i].x, pts[i].y);
+        fxCtx.lineTo(pts[j].x, pts[j].y);
+        fxCtx.stroke();
+      }
     }
+  }
+
+  // ── 4. Puntos del wireframe ───────────────────────────────────────────────
+  for (const p of pts) {
+    const bright = p.l > 180;
+    fxCtx.fillStyle   = bright ? `rgba(255,255,255,${0.8 * pulse})` : `rgba(0,255,80,${0.5 * pulse})`;
+    fxCtx.shadowBlur  = bright ? 10 : 4;
+    fxCtx.shadowColor = bright ? '#fff' : '#00ff50';
+    fxCtx.beginPath();
+    fxCtx.arc(p.x, p.y, bright ? 2.5 : 1.5, 0, Math.PI*2);
+    fxCtx.fill();
   }
 
   fxCtx.shadowBlur = 0;
 
-  // Puntos de origen brillantes
-  for (let o of origins) {
-    fxCtx.fillStyle = `rgba(255,255,255,${0.4 * alpha})`;
-    fxCtx.beginPath();
-    fxCtx.arc(o.x, o.y, 1.5, 0, Math.PI * 2);
-    fxCtx.fill();
-  }
+  // ── 5. Texto de datos encima ──────────────────────────────────────────────
+  fxCtx.fillStyle = 'rgba(0,255,80,0.6)';
+  fxCtx.font = '9px Courier New';
+  fxCtx.fillText(`SCAN :: ${pts.length.toString().padStart(4,'0')} pts`, 10, H - 24);
+  fxCtx.fillText(`0x${Date.now().toString(16).toUpperCase()}`, 10, H - 12);
 }
 
 // ─── MODO FUERTE: thermal / colores falsos ────────────────────────────────────
