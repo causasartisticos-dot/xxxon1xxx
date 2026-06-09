@@ -128,108 +128,207 @@ function triggerMode(nivel) {
 // ─── MODO LEVE: cámara rojo/negro + matrix encima ─────────────────────────────
 // (se dibuja directo en el matrix canvas con compositing)
 
-// ─── MODO MEDIO: tracking verde neón sobre negro ──────────────────────────────
-function buildLines() {}
-let wireCanvas = null, wireCtx = null;
+// ─── MODO MEDIO: datamosh — corrupción de imagen, bloques desplazados ────────
+// Técnica: capturar frame, desplazar bloques de píxeles por canales separados,
+// acumular frames anteriores (motion blur de datamosh), pixel sorting horizontal
+let dmPrevFrame = null;   // frame anterior para motion blending
+let dmAccum = null;       // canvas de acumulación entre frames
+let dmAccumCtx = null;
+function buildLines() {
+  // Inicializar canvas de acumulación cuando se activa el modo
+  if (!dmAccum) {
+    dmAccum = document.createElement('canvas');
+    dmAccum.width = W; dmAccum.height = H;
+    dmAccumCtx = dmAccum.getContext('2d');
+  } else {
+    dmAccum.width = W; dmAccum.height = H;
+  }
+  dmPrevFrame = null;
+}
 
 function drawLines(fxCtx, now) {
-  const pulse = 0.7 + Math.sin(now * 0.006) * 0.3;
-  const t     = now * 0.001;
+  const t = now * 0.001;
 
-  // Fondo negro total
-  fxCtx.fillStyle = '#000';
-  fxCtx.fillRect(0, 0, W, H);
+  // Sin cámara: datamosh de noise puro
+  if (!cameraActive || !pixelData || video.readyState < 2) {
+    _drawNoiseDatmosh(fxCtx, now);
+    return;
+  }
 
-  if (!cameraActive || !pixelData || video.readyState < 2) return;
+  // ── Capturar frame actual ────────────────────────────────────────────────
+  const capW = Math.min(W, 640), capH = Math.min(H, 480);
+  const src = document.createElement('canvas');
+  src.width = capW; src.height = capH;
+  const sctx = src.getContext('2d');
+  sctx.save(); sctx.scale(-1,1); sctx.drawImage(video, -capW, 0, capW, capH); sctx.restore();
 
-  // ── Puntos de la silueta (malla reducida para fluidez) ────────────────────
-  const pts = [];
-  const stepX = Math.floor(sampleW / 16);
-  const stepY = Math.floor(sampleH / 22);
+  const frame = sctx.getImageData(0, 0, capW, capH);
+  const data  = frame.data;
 
-  for (let py = 0; py < sampleH; py += stepY) {
-    for (let px = 0; px < sampleW; px += stepX) {
-      const mx   = sampleW - 1 - px;
-      const idx  = (py * sampleW + mx) * 4;
-      const luma = pixelData[idx]*0.299 + pixelData[idx+1]*0.587 + pixelData[idx+2]*0.114;
-      if (luma > 40) {
-        // Deformación ondulatoria
-        const deformX = Math.sin(py * 0.2 + t * 2.2) * W * 0.018;
-        const deformY = Math.cos(px * 0.25 + t * 1.6) * H * 0.014;
-        pts.push({
-          x: (px / sampleW) * W + deformX,
-          y: (py / sampleH) * H + deformY,
-          l: luma,
-        });
+  // ── PASO 1: Channel shift — separar RGB y desplazarlos ───────────────────
+  // Extraer canales por separado y desplazarlos horizontalmente
+  const shiftR = Math.floor(Math.sin(t * 1.3) * 18 + Math.random() * 12);
+  const shiftB = Math.floor(Math.cos(t * 0.9) * 22 + Math.random() * 8);
+  const shifted = new Uint8ClampedArray(data.length);
+
+  for (let y = 0; y < capH; y++) {
+    for (let x = 0; x < capW; x++) {
+      const i = (y * capW + x) * 4;
+      // Canal rojo: desplazado a la derecha
+      const xR = Math.min(capW - 1, x + shiftR);
+      const iR = (y * capW + xR) * 4;
+      // Canal azul: desplazado a la izquierda
+      const xB = Math.max(0, x - shiftB);
+      const iB = (y * capW + xB) * 4;
+      shifted[i]   = data[iR];         // R desplazado
+      shifted[i+1] = data[i+1];        // G sin mover
+      shifted[i+2] = data[iB+2];       // B desplazado opuesto
+      shifted[i+3] = 255;
+    }
+  }
+
+  // ── PASO 2: Pixel sorting por filas — ordena pixeles por brillo ──────────
+  // Solo en algunas filas para que no se vea estático
+  const sortedData = new Uint8ClampedArray(shifted);
+  const numSortRows = Math.floor(capH * 0.35); // 35% de filas se sortean
+  for (let si = 0; si < numSortRows; si++) {
+    const y = Math.floor(Math.random() * capH);
+    // Extraer fila
+    const row = [];
+    for (let x = 0; x < capW; x++) {
+      const i = (y * capW + x) * 4;
+      const luma = shifted[i]*0.299 + shifted[i+1]*0.587 + shifted[i+2]*0.114;
+      row.push({ luma, r: shifted[i], g: shifted[i+1], b: shifted[i+2] });
+    }
+    // Ordenar segmento aleatorio por brillo
+    const start = Math.floor(Math.random() * capW * 0.5);
+    const len   = Math.floor(capW * (0.1 + Math.random() * 0.5));
+    const seg   = row.slice(start, start + len).sort((a,b) => a.luma - b.luma);
+    for (let x = 0; x < seg.length; x++) {
+      const i = (y * capW + start + x) * 4;
+      sortedData[i]   = seg[x].r;
+      sortedData[i+1] = seg[x].g;
+      sortedData[i+2] = seg[x].b;
+      sortedData[i+3] = 255;
+    }
+  }
+
+  // ── PASO 3: Block displacement — bloques de píxeles desplazados ──────────
+  // Como datamosh de video: copiar bloques de posiciones aleatorias
+  const blockData = new Uint8ClampedArray(sortedData);
+  const numBlocks = 8 + Math.floor(Math.random() * 18);
+  for (let b = 0; b < numBlocks; b++) {
+    const bx  = Math.floor(Math.random() * (capW - 60));
+    const by  = Math.floor(Math.random() * (capH - 20));
+    const bw  = 20 + Math.floor(Math.random() * 80);
+    const bh  = 2  + Math.floor(Math.random() * 18);
+    const dx  = Math.floor((Math.random() - 0.5) * capW * 0.25);
+    const dy  = Math.floor((Math.random() - 0.5) * capH * 0.08);
+    // Copiar bloque con offset
+    for (let ry = 0; ry < bh; ry++) {
+      const sy = Math.min(capH-1, by + ry);
+      const ty = Math.min(capH-1, Math.max(0, by + ry + dy));
+      for (let rx = 0; rx < bw; rx++) {
+        const sx = Math.min(capW-1, bx + rx);
+        const tx = Math.min(capW-1, Math.max(0, bx + rx + dx));
+        const si2 = (sy * capW + sx) * 4;
+        const ti  = (ty * capW + tx) * 4;
+        // Mezcla con colores alterados — aquí entra el color saturado
+        blockData[ti]   = Math.min(255, sortedData[si2] * 1.8);
+        blockData[ti+1] = Math.min(255, sortedData[si2+1] * 0.6);
+        blockData[ti+2] = Math.min(255, sortedData[si2+2] * 2.2);
+        blockData[ti+3] = 255;
       }
     }
   }
 
-  if (pts.length === 0) return;
+  // ── PASO 4: Colorize — mapear a paleta datamosh saturada ─────────────────
+  // Paleta: verde neón, magenta, amarillo, cian — como las imágenes de referencia
+  for (let i = 0; i < blockData.length; i += 4) {
+    const r = blockData[i], g = blockData[i+1], b = blockData[i+2];
+    // Saturar canales
+    const maxC = Math.max(r, g, b);
+    const boost = 1.6;
+    blockData[i]   = Math.min(255, r * boost);
+    blockData[i+1] = Math.min(255, g * boost);
+    blockData[i+2] = Math.min(255, b * boost);
+  }
 
-  // ── Wireframe: solo conectar puntos MUY cercanos ──────────────────────────
-  const maxDist = W * 0.08;
-  fxCtx.shadowBlur  = 10;
-  fxCtx.shadowColor = '#00ff50';
+  // ── Poner en canvas temporal y escalar ────────────────────────────────────
+  const imgData = new ImageData(blockData, capW, capH);
+  sctx.putImageData(imgData, 0, 0);
 
-  for (let i = 0; i < pts.length; i++) {
-    for (let j = i + 1; j < pts.length; j++) {
-      const dx   = pts[i].x - pts[j].x;
-      const dy   = pts[i].y - pts[j].y;
-      const dist = dx*dx + dy*dy; // sin sqrt para velocidad
-      if (dist < maxDist * maxDist) {
-        const ratio = 1 - Math.sqrt(dist) / maxDist;
-        fxCtx.strokeStyle = `rgba(0,255,80,${ratio * 0.85 * pulse})`;
-        fxCtx.lineWidth   = ratio > 0.6 ? 2 : 1;
-        fxCtx.beginPath();
-        fxCtx.moveTo(pts[i].x, pts[i].y);
-        fxCtx.lineTo(pts[j].x, pts[j].y);
-        fxCtx.stroke();
-      }
+  // ── Motion blend con frame anterior (corazón del datamosh) ───────────────
+  if (!dmAccum || dmAccum.width !== W) buildLines();
+  // Pintar el frame actual
+  fxCtx.clearRect(0, 0, W, H);
+  fxCtx.drawImage(src, 0, 0, W, H);
+
+  // Mezclar con acumulación previa (frame ghosting)
+  if (dmPrevFrame) {
+    fxCtx.globalAlpha = 0.35;
+    fxCtx.globalCompositeOperation = 'screen';
+    fxCtx.drawImage(dmPrevFrame, 0, 0, W, H);
+    fxCtx.globalAlpha = 1;
+    fxCtx.globalCompositeOperation = 'source-over';
+  }
+
+  // ── PASO 5: Horizontal glitch strips — franjas desplazadas sobre render ───
+  const numStrips = 4 + Math.floor(Math.random() * 10);
+  for (let s = 0; s < numStrips; s++) {
+    if (Math.random() > 0.6) continue;
+    const sy  = Math.floor(Math.random() * H);
+    const sh  = 1 + Math.floor(Math.random() * 12);
+    const sdx = (Math.random() - 0.5) * W * 0.18;
+    fxCtx.drawImage(fxCtx.canvas, 0, sy, W, sh, sdx, sy, W, sh);
+  }
+
+  // ── Color aberration flash — destello de color sobre toda la pantalla ─────
+  if (Math.random() < 0.05) {
+    const flashColors = [
+      'rgba(255,0,200,0.12)', 'rgba(0,255,80,0.1)',
+      'rgba(255,220,0,0.1)',  'rgba(0,200,255,0.1)'
+    ];
+    fxCtx.fillStyle = flashColors[Math.floor(Math.random() * flashColors.length)];
+    fxCtx.fillRect(0, 0, W, H);
+  }
+
+  // ── Guardar frame para siguiente ciclo ────────────────────────────────────
+  dmPrevFrame = document.createElement('canvas');
+  dmPrevFrame.width = W; dmPrevFrame.height = H;
+  dmPrevFrame.getContext('2d').drawImage(fxCtx.canvas, 0, 0);
+
+  // ── HUD mínimo ────────────────────────────────────────────────────────────
+  fxCtx.fillStyle = 'rgba(255,220,0,0.4)';
+  fxCtx.font = '9px Courier New';
+  fxCtx.fillText(`DATAMOSH :: ERR 0x${Date.now().toString(16).slice(-6).toUpperCase()}`, 10, H-12);
+}
+
+function _drawNoiseDatmosh(fxCtx, now) {
+  // Sin cámara: bloques de ruido colorido que se mueven
+  const bSize = 8;
+  const cols2 = Math.ceil(W / bSize);
+  const rows2 = Math.ceil(H / bSize);
+  const t = now * 0.0015;
+  for (let r = 0; r < rows2; r++) {
+    for (let c = 0; c < cols2; c++) {
+      if (Math.random() > 0.25) continue;
+      const hue = (Math.sin(c * 0.3 + t) * 180 + 180) % 360;
+      const sat = 70 + Math.random() * 30;
+      const lit = 25 + Math.random() * 55;
+      fxCtx.fillStyle = `hsl(${hue},${sat}%,${lit}%)`;
+      fxCtx.fillRect(c * bSize, r * bSize, bSize, bSize);
     }
   }
-
-  // ── Nodos ─────────────────────────────────────────────────────────────────
-  for (const p of pts) {
-    const hot = p.l > 150;
-    fxCtx.fillStyle   = hot ? `rgba(255,255,255,${pulse})` : `rgba(0,255,80,${0.8*pulse})`;
-    fxCtx.shadowBlur  = hot ? 14 : 5;
-    fxCtx.shadowColor = hot ? '#fff' : '#00ff50';
-    fxCtx.beginPath();
-    fxCtx.arc(p.x, p.y, hot ? 3 : 1.5, 0, Math.PI*2);
-    fxCtx.fill();
+  // Glitch strips
+  for (let i = 0; i < 5; i++) {
+    if (Math.random() < 0.5) {
+      const gy = Math.floor(Math.random() * H);
+      const gh = 1 + Math.floor(Math.random() * 8);
+      const gdx = (Math.random()-0.5) * W * 0.3;
+      fxCtx.drawImage(fxCtx.canvas, 0, gy, W, gh, gdx, gy, W, gh);
+    }
   }
-
-  // ── Líneas largas desde puntos calientes ──────────────────────────────────
-  fxCtx.shadowBlur  = 8;
-  fxCtx.shadowColor = '#00ff50';
-  const hot = pts.filter(p => p.l > 160);
-  for (const p of hot) {
-    if (Math.random() > 0.25) continue;
-    const angle  = Math.atan2(p.y - H/2, p.x - W/2) + (Math.random()-0.5) * 1.2;
-    const length = W * (0.3 + Math.random() * 0.5);
-    fxCtx.strokeStyle = `rgba(0,255,80,${0.2 + Math.random()*0.3})`;
-    fxCtx.lineWidth   = 0.5 + Math.random() * 0.8;
-    fxCtx.beginPath();
-    fxCtx.moveTo(p.x, p.y);
-    fxCtx.lineTo(p.x + Math.cos(angle)*length, p.y + Math.sin(angle)*length);
-    fxCtx.stroke();
-  }
-
-  fxCtx.shadowBlur = 0;
-
-  // ── Glitch horizontal raro ────────────────────────────────────────────────
-  if (Math.random() < 0.06) {
-    const gy  = Math.floor(Math.random() * H);
-    const gh  = 1 + Math.floor(Math.random() * 4);
-    const gdx = (Math.random()-0.5) * W * 0.2;
-    fxCtx.drawImage(fxCtx.canvas, 0, gy, W, gh, gdx, gy, W, gh);
-  }
-
-  // ── Datos ─────────────────────────────────────────────────────────────────
-  fxCtx.fillStyle = 'rgba(0,255,80,0.5)';
-  fxCtx.font      = '9px Courier New';
-  fxCtx.fillText(`TRACK ${pts.length.toString().padStart(3,'0')} :: 0x${Date.now().toString(16).slice(-8).toUpperCase()}`, 10, H-12);
 }
 
 // ─── MODO FUERTE: thermal / colores falsos ────────────────────────────────────
@@ -449,40 +548,138 @@ function getRedChar(r, c) {
 }
 
 // ─── MODO LEVE: cámara rojo/negro encima del matrix ──────────────────────────
+// ─── MODO LEVE: CRT verde phosphor ──────────────────────────────────────────
+// Efecto monitor de tubo catódico — scanlines, phosphor glow, bleeding, ruido
+let crtPhase = 0; // fase del barrido CRT
+
 function drawCameraRedBlack(fxCtx) {
-  if (!cameraActive || !pixelData) {
-    fxCtx.clearRect(0, 0, W, H);
+  const now = Date.now();
+  crtPhase += 1;
+
+  // Sin cámara: noise verde CRT animado
+  if (!cameraActive || !pixelData || video.readyState < 2) {
+    fxCtx.fillStyle = '#000';
+    fxCtx.fillRect(0, 0, W, H);
+    // Noise de fósforo verde
+    const imgD = fxCtx.createImageData(W, H);
+    const d = imgD.data;
+    for (let i = 0; i < d.length; i += 4) {
+      const v = Math.random() < 0.04 ? Math.floor(Math.random() * 180) : 0;
+      d[i] = 0; d[i+1] = v; d[i+2] = Math.floor(v * 0.15); d[i+3] = 255;
+    }
+    fxCtx.putImageData(imgD, 0, 0);
+    _drawCRTOverlay(fxCtx, now);
     return;
   }
-  // Dibujar cámara como imagen rojo/negro
+
+  // ── Capturar frame de cámara a alta resolución ───────────────────────────
+  const capW = Math.min(W, 640), capH = Math.min(H, 480);
   const tmp = document.createElement('canvas');
-  tmp.width = sampleW; tmp.height = sampleH;
+  tmp.width = capW; tmp.height = capH;
   const tctx = tmp.getContext('2d');
-  tctx.drawImage(video, 0, 0, sampleW, sampleH);
-  const frame = tctx.getImageData(0, 0, sampleW, sampleH);
+  // Mirror horizontal
+  tctx.save(); tctx.scale(-1,1); tctx.drawImage(video, -capW, 0, capW, capH); tctx.restore();
+
+  const frame = tctx.getImageData(0, 0, capW, capH);
   const data  = frame.data;
+
+  // ── Procesar pixel a pixel: verde CRT con bleeding y noise ───────────────
   for (let i = 0; i < data.length; i += 4) {
     const luma = data[i]*0.299 + data[i+1]*0.587 + data[i+2]*0.114;
-    const v    = Math.min(255, luma * 2.2);
-    data[i]   = v;   // rojo
-    data[i+1] = 0;   // verde = 0
-    data[i+2] = 0;   // azul  = 0
+    // Curva de respuesta del fósforo — log para negros profundos, satura en altos
+    const phos = Math.pow(luma / 255, 0.75) * 255;
+    // Boost de contraste
+    const v = Math.min(255, phos * 1.45);
+    // Canal verde dominante, toque de azul para el tint de tubo
+    data[i]   = Math.floor(v * 0.04);          // rojo casi negro
+    data[i+1] = Math.floor(v);                  // verde phosphor
+    data[i+2] = Math.floor(v * 0.18);           // azul tenue
+    data[i+3] = 255;
+    // Noise de grano del CRT — solo en zonas medias
+    if (v > 20 && v < 220 && Math.random() < 0.08) {
+      const grain = (Math.random() - 0.5) * 28;
+      data[i+1] = Math.max(0, Math.min(255, data[i+1] + grain));
+    }
   }
   tctx.putImageData(frame, 0, 0);
 
-  fxCtx.clearRect(0, 0, W, H);
-  fxCtx.globalAlpha = 0.65;
-  fxCtx.save();
-  fxCtx.scale(-1, 1);
-  fxCtx.drawImage(tmp, -W, 0, W, H);
-  fxCtx.restore();
-  fxCtx.globalAlpha = 1;
+  // ── Render al fxCanvas ───────────────────────────────────────────────────
+  fxCtx.fillStyle = '#000';
+  fxCtx.fillRect(0, 0, W, H);
+  fxCtx.drawImage(tmp, 0, 0, W, H);
 
-  // Scanlines
+  // ── Phosphor glow — desenfoque suave encima ──────────────────────────────
+  fxCtx.globalCompositeOperation = 'screen';
+  fxCtx.globalAlpha = 0.18;
+  fxCtx.filter = 'blur(3px)';
+  fxCtx.drawImage(tmp, 0, 0, W, H);
+  fxCtx.filter = 'none';
+  fxCtx.globalAlpha = 1;
+  fxCtx.globalCompositeOperation = 'source-over';
+
+  // ── Bleeding horizontal — fósforo que se "derrama" ──────────────────────
+  fxCtx.globalCompositeOperation = 'screen';
+  fxCtx.globalAlpha = 0.06;
+  fxCtx.filter = 'blur(8px)';
+  fxCtx.drawImage(tmp, 3, 0, W, H);
+  fxCtx.filter = 'none';
+  fxCtx.globalAlpha = 1;
+  fxCtx.globalCompositeOperation = 'source-over';
+
+  _drawCRTOverlay(fxCtx, now);
+}
+
+function _drawCRTOverlay(fxCtx, now) {
+  const t = now * 0.001;
+
+  // ── Scanlines — líneas oscuras cada 2px, efecto tubo CRT ─────────────────
   for (let y = 0; y < H; y += 2) {
-    fxCtx.fillStyle = 'rgba(0,0,0,0.18)';
+    fxCtx.fillStyle = 'rgba(0,0,0,0.38)';
     fxCtx.fillRect(0, y, W, 1);
   }
+
+  // ── Barrido vertical (refresh line) — línea brillante que sube ───────────
+  const scanY = (now % 1800) / 1800 * H;
+  const grad = fxCtx.createLinearGradient(0, scanY - 8, 0, scanY + 8);
+  grad.addColorStop(0, 'rgba(0,255,80,0)');
+  grad.addColorStop(0.5, 'rgba(0,255,80,0.12)');
+  grad.addColorStop(1, 'rgba(0,255,80,0)');
+  fxCtx.fillStyle = grad;
+  fxCtx.fillRect(0, scanY - 8, W, 16);
+
+  // ── Glitch horizontal — desplazamiento de líneas aleatorio ───────────────
+  if (Math.random() < 0.12) {
+    const gy = Math.floor(Math.random() * H);
+    const gh = 1 + Math.floor(Math.random() * 5);
+    const gdx = (Math.random() - 0.5) * W * 0.04;
+    fxCtx.drawImage(fxCtx.canvas, 0, gy, W, gh, gdx, gy, W, gh);
+  }
+
+  // ── Jitter vertical — pequeño temblor de pantalla ────────────────────────
+  if (Math.random() < 0.04) {
+    const jitter = (Math.random() - 0.5) * 3;
+    fxCtx.drawImage(fxCtx.canvas, 0, jitter, W, H);
+  }
+
+  // ── Vignette CRT — bordes oscuros curvos ─────────────────────────────────
+  const vig = fxCtx.createRadialGradient(W/2, H/2, H*0.3, W/2, H/2, H*0.85);
+  vig.addColorStop(0, 'rgba(0,0,0,0)');
+  vig.addColorStop(1, 'rgba(0,0,0,0.55)');
+  fxCtx.fillStyle = vig;
+  fxCtx.fillRect(0, 0, W, H);
+
+  // ── Ruido de fósforo persistente — partículas verdes ─────────────────────
+  fxCtx.fillStyle = `rgba(0,255,60,${0.3 + Math.random()*0.25})`;
+  for (let i = 0; i < 6; i++) {
+    const px = Math.random() * W;
+    const py = Math.random() * H;
+    fxCtx.fillRect(px, py, 1 + Math.random()*2, 1);
+  }
+
+  // ── Texto de datos — HUD del CRT ─────────────────────────────────────────
+  fxCtx.fillStyle = 'rgba(0,255,80,0.45)';
+  fxCtx.font = '9px Courier New';
+  fxCtx.fillText(`CRT :: 0x${Date.now().toString(16).slice(-8).toUpperCase()}`, 10, H-12);
 }
 
 // ─── DRAW MATRIX ─────────────────────────────────────────────────────────────
