@@ -579,7 +579,7 @@ function drawCameraRedBlack(fxCtx) {
   // ── BLOOM — 3 capas de blur en screen para el halo verde intenso ─────────
   // Capa 1: bloom cercano — define el halo inmediato alrededor de zonas brillantes
   fxCtx.globalCompositeOperation = 'screen';
-  fxCtx.globalAlpha = 0.55;
+  fxCtx.globalAlpha = 0.85;
   fxCtx.filter = 'blur(4px)';
   fxCtx.drawImage(tmp, 0, 0, W, H);
   fxCtx.filter = 'none';
@@ -588,7 +588,7 @@ function drawCameraRedBlack(fxCtx) {
 
   // Capa 2: bloom medio — el resplandor más amplio
   fxCtx.globalCompositeOperation = 'screen';
-  fxCtx.globalAlpha = 0.35;
+  fxCtx.globalAlpha = 0.55;
   fxCtx.filter = 'blur(12px)';
   fxCtx.drawImage(tmp, 0, 0, W, H);
   fxCtx.filter = 'none';
@@ -597,7 +597,7 @@ function drawCameraRedBlack(fxCtx) {
 
   // Capa 3: bloom largo — aureola difusa en zonas muy brillantes
   fxCtx.globalCompositeOperation = 'screen';
-  fxCtx.globalAlpha = 0.18;
+  fxCtx.globalAlpha = 0.28;
   fxCtx.filter = 'blur(28px)';
   fxCtx.drawImage(tmp, 0, 0, W, H);
   fxCtx.filter = 'none';
@@ -606,7 +606,7 @@ function drawCameraRedBlack(fxCtx) {
 
   // ── Bleeding horizontal ───────────────────────────────────────────────────
   fxCtx.globalCompositeOperation = 'screen';
-  fxCtx.globalAlpha = 0.08;
+  fxCtx.globalAlpha = 0.18;
   fxCtx.filter = 'blur(10px)';
   fxCtx.drawImage(tmp, 4, 0, W, H);
   fxCtx.filter = 'none';
@@ -623,9 +623,9 @@ function _drawCRTOverlay(fxCtx, now) {
   // y += 14: espacio total de cada ciclo (negro + verde)
   // fillRect(..., 9): grosor de la banda negra
   // → queda ~5px de verde visible entre cada línea negra
-  for (let y = 0; y < H; y += 14) {
+  for (let y = 0; y < H; y += 24) {
     fxCtx.fillStyle = 'rgba(0,0,0,0.92)';
-    fxCtx.fillRect(0, y, W, 9);
+    fxCtx.fillRect(0, y, W, 11);
   }
 
   // ── Barrido vertical (refresh line) ──────────────────────────────────────
@@ -638,7 +638,7 @@ function _drawCRTOverlay(fxCtx, now) {
   fxCtx.fillRect(0, scanY - 12, W, 24);
 
   // ── Glitch horizontal ─────────────────────────────────────────────────────
-  if (Math.random() < 0.12) {
+  if (Math.random() < 0.32) {
     const gy = Math.floor(Math.random() * H);
     const gh = 1 + Math.floor(Math.random() * 5);
     const gdx = (Math.random() - 0.5) * W * 0.04;
@@ -659,7 +659,7 @@ function _drawCRTOverlay(fxCtx, now) {
   fxCtx.fillRect(0, 0, W, H);
 
   // ── Partículas de fósforo ─────────────────────────────────────────────────
-  fxCtx.fillStyle = `rgba(0,255,60,${0.3 + Math.random()*0.25})`;
+  fxCtx.fillStyle = `rgba(0,255,60,${0.3 + Math.random()*0.35})`;
   for (let i = 0; i < 6; i++) {
     const px = Math.random() * W;
     const py = Math.random() * H;
