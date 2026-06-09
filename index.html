@@ -128,77 +128,34 @@ function triggerMode(nivel) {
 // ─── MODO LEVE: cámara rojo/negro + matrix encima ─────────────────────────────
 // (se dibuja directo en el matrix canvas con compositing)
 
-// ─── MODO MEDIO: wireframe verde agresivo + deformación ──────────────────────
+// ─── MODO MEDIO: tracking verde neón sobre negro ──────────────────────────────
 function buildLines() {}
-
-// Canvas offscreen para procesar la silueta
 let wireCanvas = null, wireCtx = null;
 
 function drawLines(fxCtx, now) {
-  fxCtx.clearRect(0, 0, W, H);
-
   const pulse = 0.7 + Math.sin(now * 0.006) * 0.3;
   const t     = now * 0.001;
 
+  // Fondo negro total
+  fxCtx.fillStyle = '#000';
+  fxCtx.fillRect(0, 0, W, H);
+
   if (!cameraActive || !pixelData || video.readyState < 2) return;
 
-  // ── Offscreen canvas del tamaño de muestra ────────────────────────────────
-  if (!wireCanvas) {
-    wireCanvas = document.createElement('canvas');
-    wireCtx    = wireCanvas.getContext('2d');
-  }
-  wireCanvas.width  = sampleW;
-  wireCanvas.height = sampleH;
-  wireCtx.drawImage(video, 0, 0, sampleW, sampleH);
-  const frame = wireCtx.getImageData(0, 0, sampleW, sampleH);
-  const data  = frame.data;
-
-  // ── Convertir a blanco/negro duro (umbral) ────────────────────────────────
-  for (let i = 0; i < data.length; i += 4) {
-    const luma = data[i]*0.299 + data[i+1]*0.587 + data[i+2]*0.114;
-    const v    = luma > 40 ? 255 : 0;
-    data[i] = data[i+1] = data[i+2] = v;
-  }
-  wireCtx.putImageData(frame, 0, 0);
-
-  // ── 1. SILUETA: dibujar en negro puro (fondo negro = solo la persona) ─────
-  fxCtx.save();
-  fxCtx.scale(-1, 1);
-  // Imagen en escala de grises muy oscura como base
-  fxCtx.globalAlpha = 0.18;
-  fxCtx.drawImage(wireCanvas, -W, 0, W, H);
-  fxCtx.restore();
-  fxCtx.globalAlpha = 1;
-
-  // ── 2. COPIA FANTASMA desplazada (efecto duplicación agresivo) ────────────
-  const ghosts = [
-    { dx: W*0.06,  dy: -H*0.06, a: 0.18, scale: 1.04 },
-    { dx: -W*0.06, dy:  H*0.06, a: 0.14, scale: 0.97 },
-  ];
-  for (const g of ghosts) {
-    fxCtx.save();
-    fxCtx.globalAlpha = g.a * pulse;
-    fxCtx.translate(W/2 + g.dx, H/2 + g.dy);
-    fxCtx.scale(-g.scale, g.scale);
-    fxCtx.drawImage(wireCanvas, -W/2, -H/2, W, H);
-    fxCtx.restore();
-    fxCtx.globalAlpha = 1;
-  }
-
-  // ── 3. PUNTOS DE LA MALLA ─────────────────────────────────────────────────
+  // ── Puntos de la silueta (malla reducida para fluidez) ────────────────────
   const pts = [];
-  const stepX = Math.floor(sampleW / 22);
-  const stepY = Math.floor(sampleH / 30);
+  const stepX = Math.floor(sampleW / 16);
+  const stepY = Math.floor(sampleH / 22);
 
   for (let py = 0; py < sampleH; py += stepY) {
     for (let px = 0; px < sampleW; px += stepX) {
-      const mx   = sampleW - 1 - px; // mirror
+      const mx   = sampleW - 1 - px;
       const idx  = (py * sampleW + mx) * 4;
       const luma = pixelData[idx]*0.299 + pixelData[idx+1]*0.587 + pixelData[idx+2]*0.114;
-      if (luma > 35) {
-        // Deformación: desplazamiento ondulado por posición + tiempo
-        const deformX = Math.sin(py * 0.18 + t * 2.5) * W * 0.025;
-        const deformY = Math.cos(px * 0.22 + t * 1.8) * H * 0.018;
+      if (luma > 40) {
+        // Deformación ondulatoria
+        const deformX = Math.sin(py * 0.2 + t * 2.2) * W * 0.018;
+        const deformY = Math.cos(px * 0.25 + t * 1.6) * H * 0.014;
         pts.push({
           x: (px / sampleW) * W + deformX,
           y: (py / sampleH) * H + deformY,
@@ -210,22 +167,20 @@ function drawLines(fxCtx, now) {
 
   if (pts.length === 0) return;
 
-  // ── 4. WIREFRAME: conectar puntos con líneas verdes gruesas ───────────────
-  const maxDist = W * 0.1;
-  fxCtx.shadowBlur  = 14;
+  // ── Wireframe: solo conectar puntos MUY cercanos ──────────────────────────
+  const maxDist = W * 0.08;
+  fxCtx.shadowBlur  = 10;
   fxCtx.shadowColor = '#00ff50';
 
   for (let i = 0; i < pts.length; i++) {
     for (let j = i + 1; j < pts.length; j++) {
       const dx   = pts[i].x - pts[j].x;
       const dy   = pts[i].y - pts[j].y;
-      const dist = Math.sqrt(dx*dx + dy*dy);
-      if (dist < maxDist) {
-        const ratio = 1 - dist / maxDist;
-        const a     = ratio * 0.9 * pulse;
-        const w     = ratio > 0.7 ? 2.5 : ratio > 0.4 ? 1.5 : 0.8;
-        fxCtx.strokeStyle = `rgba(0,255,80,${a})`;
-        fxCtx.lineWidth   = w;
+      const dist = dx*dx + dy*dy; // sin sqrt para velocidad
+      if (dist < maxDist * maxDist) {
+        const ratio = 1 - Math.sqrt(dist) / maxDist;
+        fxCtx.strokeStyle = `rgba(0,255,80,${ratio * 0.85 * pulse})`;
+        fxCtx.lineWidth   = ratio > 0.6 ? 2 : 1;
         fxCtx.beginPath();
         fxCtx.moveTo(pts[i].x, pts[i].y);
         fxCtx.lineTo(pts[j].x, pts[j].y);
@@ -234,27 +189,27 @@ function drawLines(fxCtx, now) {
     }
   }
 
-  // ── 5. NODOS: puntos brillantes en intersecciones ─────────────────────────
+  // ── Nodos ─────────────────────────────────────────────────────────────────
   for (const p of pts) {
-    const isHot = p.l > 160;
-    fxCtx.fillStyle   = isHot ? `rgba(255,255,255,${pulse})` : `rgba(0,255,80,${0.7*pulse})`;
-    fxCtx.shadowBlur  = isHot ? 16 : 6;
-    fxCtx.shadowColor = isHot ? '#ffffff' : '#00ff50';
+    const hot = p.l > 150;
+    fxCtx.fillStyle   = hot ? `rgba(255,255,255,${pulse})` : `rgba(0,255,80,${0.8*pulse})`;
+    fxCtx.shadowBlur  = hot ? 14 : 5;
+    fxCtx.shadowColor = hot ? '#fff' : '#00ff50';
     fxCtx.beginPath();
-    fxCtx.arc(p.x, p.y, isHot ? 3 : 2, 0, Math.PI*2);
+    fxCtx.arc(p.x, p.y, hot ? 3 : 1.5, 0, Math.PI*2);
     fxCtx.fill();
   }
 
-  // ── 6. LÍNEAS LARGAS desde nodos calientes hacia bordes ───────────────────
-  const hotPts = pts.filter(p => p.l > 150);
-  fxCtx.shadowBlur  = 10;
+  // ── Líneas largas desde puntos calientes ──────────────────────────────────
+  fxCtx.shadowBlur  = 8;
   fxCtx.shadowColor = '#00ff50';
-  for (const p of hotPts) {
-    if (Math.random() > 0.35) continue; // no todas, para no saturar
-    const angle  = Math.atan2(p.y - H/2, p.x - W/2) + (Math.random()-0.5) * 0.8;
-    const length = W * (0.4 + Math.random() * 0.5);
-    fxCtx.strokeStyle = `rgba(0,255,80,${0.25 + Math.random()*0.35})`;
-    fxCtx.lineWidth   = 0.6 + Math.random();
+  const hot = pts.filter(p => p.l > 160);
+  for (const p of hot) {
+    if (Math.random() > 0.25) continue;
+    const angle  = Math.atan2(p.y - H/2, p.x - W/2) + (Math.random()-0.5) * 1.2;
+    const length = W * (0.3 + Math.random() * 0.5);
+    fxCtx.strokeStyle = `rgba(0,255,80,${0.2 + Math.random()*0.3})`;
+    fxCtx.lineWidth   = 0.5 + Math.random() * 0.8;
     fxCtx.beginPath();
     fxCtx.moveTo(p.x, p.y);
     fxCtx.lineTo(p.x + Math.cos(angle)*length, p.y + Math.sin(angle)*length);
@@ -263,19 +218,18 @@ function drawLines(fxCtx, now) {
 
   fxCtx.shadowBlur = 0;
 
-  // ── 7. GLITCH horizontal ocasional ───────────────────────────────────────
-  if (Math.random() < 0.1) {
+  // ── Glitch horizontal raro ────────────────────────────────────────────────
+  if (Math.random() < 0.06) {
     const gy  = Math.floor(Math.random() * H);
-    const gh  = 2 + Math.floor(Math.random() * 6);
-    const gdx = (Math.random()-0.5) * W * 0.15;
+    const gh  = 1 + Math.floor(Math.random() * 4);
+    const gdx = (Math.random()-0.5) * W * 0.2;
     fxCtx.drawImage(fxCtx.canvas, 0, gy, W, gh, gdx, gy, W, gh);
   }
 
-  // ── 8. Datos en esquina ───────────────────────────────────────────────────
-  fxCtx.fillStyle = 'rgba(0,255,80,0.55)';
+  // ── Datos ─────────────────────────────────────────────────────────────────
+  fxCtx.fillStyle = 'rgba(0,255,80,0.5)';
   fxCtx.font      = '9px Courier New';
-  fxCtx.fillText(`MESH ${pts.length.toString().padStart(4,'0')} :: DEFORM ON`, 10, H-24);
-  fxCtx.fillText(`0x${Date.now().toString(16).toUpperCase()}`, 10, H-12);
+  fxCtx.fillText(`TRACK ${pts.length.toString().padStart(3,'0')} :: 0x${Date.now().toString(16).slice(-8).toUpperCase()}`, 10, H-12);
 }
 
 // ─── MODO FUERTE: thermal / colores falsos ────────────────────────────────────
