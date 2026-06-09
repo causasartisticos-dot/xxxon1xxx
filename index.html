@@ -9,13 +9,13 @@
 html,body{width:100%;height:100%;background:#000;overflow:hidden;touch-action:none}
 #video{position:fixed;top:-9999px;left:-9999px;width:1px;height:1px}
 #matrix-canvas{position:fixed;top:0;left:0;width:100%;height:100%;z-index:1}
-#fx-canvas{position:fixed;top:0;left:0;width:100%;height:100%;z-index:2;pointer-events:none;display:none}
+#fx-canvas{position:fixed;top:0;left:0;width:100%;height:100%;z-index:2;pointer-events:none}
 #start{
   position:fixed;top:0;left:0;width:100%;height:100%;
   background:#000;z-index:100;
   display:flex;flex-direction:column;
   align-items:center;justify-content:center;
-  gap:28px;cursor:pointer;font-family:'Courier New',monospace;
+  gap:28px;font-family:'Courier New',monospace;
 }
 #start-haiku{font-size:clamp(13px,3.5vw,17px);color:#fff;line-height:2.4;text-align:center;letter-spacing:0.05em}
 #start-haiku .red{color:#e00;font-weight:700}
@@ -27,13 +27,13 @@ html,body{width:100%;height:100%;background:#000;overflow:hidden;touch-action:no
 
 <div id="start">
   <div id="start-haiku">
-    <span class="red">000000101</span><br>
-    <span class="red">101010101</span><br>
-    <span class="red">000101010</span><br>
+    <span class="red">¿Qué harías tú</span><br>
+    <span class="red">en una revolución?</span><br>
+    <span class="red">¡Levántate!</span><br>
     <span class="red">Nadie te salvará</span>
   </div>
   <button id="start-btn" onclick="iniciar()">INICIAR</button>
-  <div id="artist-tag" style="font-family:'Courier New',monospace;font-size:11px;color:#e00;letter-spacing:0.3em">ON1</div>
+  <div style="font-family:'Courier New',monospace;font-size:11px;color:#e00;letter-spacing:0.3em">ON1</div>
   <div id="start-sub">3RROR DE USUARIO · ON1</div>
 </div>
 
@@ -45,7 +45,6 @@ html,body{width:100%;height:100%;background:#000;overflow:hidden;touch-action:no
 <script>
 // ─── AUDIO ────────────────────────────────────────────────────────────────────
 let audioCtx, masterGain, noiseGain;
-let audioReady = false;
 
 function initAudio() {
   audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -53,43 +52,38 @@ function initAudio() {
   masterGain.gain.setValueAtTime(0, audioCtx.currentTime);
   masterGain.gain.linearRampToValueAtTime(0.85, audioCtx.currentTime + 2);
   masterGain.connect(audioCtx.destination);
-
   const song = new Audio('levantate_-_los_crudos.mp3');
   song.loop = true;
-  const songSource = audioCtx.createMediaElementSource(song);
-  songSource.connect(masterGain);
+  const src = audioCtx.createMediaElementSource(song);
+  src.connect(masterGain);
   song.play().catch(() => {});
-
   const bufSize = audioCtx.sampleRate * 4;
   const buf = audioCtx.createBuffer(1, bufSize, audioCtx.sampleRate);
   const d = buf.getChannelData(0);
   for (let i = 0; i < bufSize; i++) d[i] = Math.random() * 2 - 1;
-  const noiseSrc = audioCtx.createBufferSource();
-  noiseSrc.buffer = buf; noiseSrc.loop = true;
+  const ns = audioCtx.createBufferSource();
+  ns.buffer = buf; ns.loop = true;
   const lp = audioCtx.createBiquadFilter();
   lp.type = 'lowpass'; lp.frequency.value = 400;
-  noiseGain = audioCtx.createGain();
-  noiseGain.gain.value = 0;
-  noiseSrc.connect(lp); lp.connect(noiseGain); noiseGain.connect(masterGain);
-  noiseSrc.start();
-  audioReady = true;
+  noiseGain = audioCtx.createGain(); noiseGain.gain.value = 0;
+  ns.connect(lp); lp.connect(noiseGain); noiseGain.connect(masterGain);
+  ns.start();
 }
 
-function updateAudioMotion(motion) {
+function updateAudioMotion(m) {
   if (!audioCtx || !noiseGain) return;
-  noiseGain.gain.setTargetAtTime(0.016 + motion * 0.055, audioCtx.currentTime, 0.4);
+  noiseGain.gain.setTargetAtTime(0.016 + m * 0.055, audioCtx.currentTime, 0.4);
 }
 
-// ─── WEBSOCKET — TouchDesigner ────────────────────────────────────────────────
-// Cambia esta IP por la de tu laptop: abre cmd → ipconfig → IPv4
-const TD_IP   = '192.168.100.57'; // ← CAMBIA ESTO
+// ─── WEBSOCKET ────────────────────────────────────────────────────────────────
+const TD_IP   = '192.168.100.57';
 const TD_PORT = 9090;
 let ws = null;
 
 function connectWS() {
   try {
     ws = new WebSocket(`ws://${TD_IP}:${TD_PORT}`);
-    ws.onopen    = () => console.log('[WS] TouchDesigner conectado');
+    ws.onopen    = () => console.log('[WS] conectado');
     ws.onmessage = (e) => {
       try {
         const msg = JSON.parse(e.data);
@@ -101,254 +95,204 @@ function connectWS() {
   } catch(_) {}
 }
 
-// ─── MODOS VISUALES ───────────────────────────────────────────────────────────
-// leve  → glitch en el matrix
-// medio → waveform del golpe
-// fuerte→ silueta en hex deformada
-// max   → data stream binario + noise Ikeda
-
+// ─── MODOS ────────────────────────────────────────────────────────────────────
 let currentMode = 'matrix';
 let modeUntil   = 0;
 let glitchLevel = 0;
 let glitchUntil = 0;
 let glitchShift = [];
-let flashActive = false;
-
-// Waveform
-let waveformSamples = [];
-
-// Hex silueta
-let hexFrame = null;
-
-// Data stream / Ikeda
-let ikedaParticles = [];
-let ikedaColumns   = [];
 
 function triggerMode(nivel) {
   const now = Date.now();
   currentMode = nivel;
-  modeUntil   = now + (nivel === 'leve' ? 800 : nivel === 'medio' ? 2500 : nivel === 'fuerte' ? 3500 : 5000);
-
   if (nivel === 'leve') {
-    glitchLevel = 1; glitchUntil = now + 800;
-    glitchShift = Array.from({length: rows}, () => Math.random() < 0.2 ? (Math.random()-0.5)*20 : 0);
+    modeUntil   = now + 1500;
+    glitchLevel = 1; glitchUntil = now + 1500;
+    glitchShift = Array.from({length: rows}, () =>
+      Math.random() < 0.25 ? (Math.random()-0.5)*25 : 0);
   } else if (nivel === 'medio') {
-    glitchLevel = 2; glitchUntil = now + 2500;
-    glitchShift = Array.from({length: rows}, () => Math.random() < 0.35 ? (Math.random()-0.5)*45 : 0);
-    buildWaveform();
-    fxCanvas.style.display = 'block';
-  } else if (nivel === 'fuerte') {
-    glitchLevel = 3; glitchUntil = now + 3500;
-    glitchShift = Array.from({length: rows}, () => Math.random() < 0.6 ? (Math.random()-0.5)*80 : 0);
-    captureHexFrame();
-    fxCanvas.style.display = 'block';
-  } else if (nivel === 'max') {
-    glitchLevel = 3; glitchUntil = now + 5000;
-    flashActive = true;
-    setTimeout(() => { flashActive = false; }, 120);
-    buildIkeda();
-    fxCanvas.style.display = 'block';
+    modeUntil = now + 3000;
+    glitchLevel = 2; glitchUntil = now + 3000;
+    glitchShift = Array.from({length: rows}, () =>
+      Math.random() < 0.4 ? (Math.random()-0.5)*50 : 0);
+    buildLines();
+  } else if (nivel === 'fuerte' || nivel === 'max') {
+    currentMode = 'fuerte';
+    modeUntil = now + 4000;
+    glitchLevel = 3; glitchUntil = now + 4000;
+    glitchShift = Array.from({length: rows}, () =>
+      Math.random() < 0.55 ? (Math.random()-0.5)*70 : 0);
   }
 }
 
-// ─── WAVEFORM ─────────────────────────────────────────────────────────────────
-function buildWaveform() {
-  waveformSamples = [];
-  const count = 300;
-  // Simula una señal de impacto con decay exponencial + ruido
-  for (let i = 0; i < count; i++) {
-    const t = i / count;
-    const decay = Math.exp(-t * 8);
-    const noise = (Math.random() * 2 - 1) * decay;
-    const sine  = Math.sin(t * Math.PI * 24) * decay * 0.6;
-    waveformSamples.push((noise + sine) * 0.9);
-  }
+// ─── MODO LEVE: cámara rojo/negro + matrix encima ─────────────────────────────
+// (se dibuja directo en el matrix canvas con compositing)
+
+// ─── MODO MEDIO: líneas rojas desde silueta ───────────────────────────────────
+let redLines = [];
+
+function buildLines() {
+  redLines = [];
+  // Se generan en drawLines() cuando hay pixelData
 }
 
-function drawWaveform(fxCtx, now) {
+function drawLines(fxCtx, now) {
   fxCtx.clearRect(0, 0, W, H);
-  fxCtx.fillStyle = '#000';
+  if (!pixelData) return;
+
+  const progress = 1 - (modeUntil - now) / 3000;
+  const alpha    = Math.sin(progress * Math.PI);
+
+  // Fondo semitransparente
+  fxCtx.fillStyle = `rgba(0,0,0,${0.55 * alpha})`;
   fxCtx.fillRect(0, 0, W, H);
 
-  const progress = 1 - (modeUntil - now) / 2500;
-  const visible  = Math.floor(waveformSamples.length * Math.min(progress * 3, 1));
+  // Detectar puntos brillantes de la silueta como origen de líneas
+  const origins = [];
+  const stepX = Math.floor(sampleW / 12);
+  const stepY = Math.floor(sampleH / 16);
 
-  // Línea central
-  fxCtx.strokeStyle = 'rgba(255,255,255,0.08)';
-  fxCtx.lineWidth = 1;
-  fxCtx.beginPath();
-  fxCtx.moveTo(0, H / 2);
-  fxCtx.lineTo(W, H / 2);
-  fxCtx.stroke();
-
-  // Waveform principal
-  fxCtx.strokeStyle = '#fff';
-  fxCtx.lineWidth = 1.5;
-  fxCtx.shadowBlur = 8;
-  fxCtx.shadowColor = '#fff';
-  fxCtx.beginPath();
-  for (let i = 0; i < visible; i++) {
-    const x = (i / waveformSamples.length) * W;
-    const y = H / 2 + waveformSamples[i] * H * 0.38;
-    i === 0 ? fxCtx.moveTo(x, y) : fxCtx.lineTo(x, y);
+  for (let py = 0; py < sampleH; py += stepY) {
+    for (let px = 0; px < sampleW; px += stepX) {
+      const mx  = sampleW - 1 - px;
+      const idx = (py * sampleW + mx) * 4;
+      const luma = pixelData[idx]*0.299 + pixelData[idx+1]*0.587 + pixelData[idx+2]*0.114;
+      if (luma > 60) {
+        origins.push({
+          x: (px / sampleW) * W,
+          y: (py / sampleH) * H,
+        });
+      }
+    }
   }
-  fxCtx.stroke();
+
+  if (origins.length === 0) return;
+
+  // Desde cada origen: líneas hacia esquinas y puntos aleatorios
+  const targets = [
+    {x: 0, y: 0}, {x: W, y: 0}, {x: 0, y: H}, {x: W, y: H},
+    {x: W/2, y: 0}, {x: W/2, y: H}, {x: 0, y: H/2}, {x: W, y: H/2},
+  ];
+
+  fxCtx.shadowBlur  = 6;
+  fxCtx.shadowColor = '#ff0000';
+
+  for (let o of origins) {
+    const count = 3 + Math.floor(Math.random() * 4);
+    for (let i = 0; i < count; i++) {
+      const t = targets[Math.floor(Math.random() * targets.length)];
+      const jx = t.x + (Math.random()-0.5) * W * 0.3;
+      const jy = t.y + (Math.random()-0.5) * H * 0.3;
+      const a  = (0.15 + Math.random() * 0.45) * alpha;
+      fxCtx.strokeStyle = `rgba(255,${Math.floor(Math.random()*30)},${Math.floor(Math.random()*30)},${a})`;
+      fxCtx.lineWidth   = 0.5 + Math.random() * 1.5;
+      fxCtx.beginPath();
+      fxCtx.moveTo(o.x, o.y);
+      fxCtx.lineTo(jx, jy);
+      fxCtx.stroke();
+    }
+  }
+
   fxCtx.shadowBlur = 0;
 
-  // Coordenadas estilo Ikeda
-  fxCtx.fillStyle = 'rgba(255,255,255,0.5)';
-  fxCtx.font = '10px Courier New';
-  fxCtx.fillText(`AMPLITUDE  ${(Math.abs(waveformSamples[Math.floor(visible*0.3)] || 0)).toFixed(6)}`, 16, H - 40);
-  fxCtx.fillText(`SAMPLES    ${visible.toString().padStart(6,'0')} / ${waveformSamples.length}`, 16, H - 26);
-  fxCtx.fillText(`FREQ       ${(44100).toString()}hz`, 16, H - 12);
-}
-
-// ─── HEX SILUETA ──────────────────────────────────────────────────────────────
-function captureHexFrame() {
-  if (!cameraActive || video.readyState < 2) {
-    hexFrame = null; return;
+  // Puntos de origen brillantes
+  for (let o of origins) {
+    fxCtx.fillStyle = `rgba(255,255,255,${0.4 * alpha})`;
+    fxCtx.beginPath();
+    fxCtx.arc(o.x, o.y, 1.5, 0, Math.PI * 2);
+    fxCtx.fill();
   }
-  const tmp = document.createElement('canvas');
-  tmp.width = 48; tmp.height = 72;
-  tmp.getContext('2d').drawImage(video, 0, 0, 48, 72);
-  hexFrame = tmp.getContext('2d').getImageData(0, 0, 48, 72);
 }
 
-function drawHexSilueta(fxCtx, now) {
-  fxCtx.clearRect(0, 0, W, H);
-  fxCtx.fillStyle = '#000';
-  fxCtx.fillRect(0, 0, W, H);
+// ─── MODO FUERTE: thermal / colores falsos ────────────────────────────────────
+// Paleta thermal: negro → azul → cian → verde → amarillo → rojo → blanco
+const THERMAL = [
+  [0,0,0],[0,0,180],[0,80,255],[0,220,220],
+  [0,255,100],[180,255,0],[255,200,0],[255,80,0],[255,0,0],[255,255,255]
+];
 
-  const progress = 1 - (modeUntil - now) / 3500;
-  const deform   = Math.sin(progress * Math.PI) * 18;
-  const fontSize = 9;
-  fxCtx.font = `${fontSize}px Courier New`;
+function thermalColor(luma) {
+  const t   = luma / 255;
+  const idx = t * (THERMAL.length - 1);
+  const lo  = Math.floor(idx);
+  const hi  = Math.min(lo + 1, THERMAL.length - 1);
+  const f   = idx - lo;
+  const r   = Math.round(THERMAL[lo][0] * (1-f) + THERMAL[hi][0] * f);
+  const g   = Math.round(THERMAL[lo][1] * (1-f) + THERMAL[hi][1] * f);
+  const b   = Math.round(THERMAL[lo][2] * (1-f) + THERMAL[hi][2] * f);
+  return [r, g, b];
+}
 
-  if (!hexFrame) {
-    // Sin cámara: grilla de hex aleatoria
-    for (let row = 0; row < Math.floor(H / fontSize); row++) {
-      for (let col = 0; col < Math.floor(W / 28); col++) {
-        const val = Math.floor(Math.random() * 256).toString(16).padStart(2,'0').toUpperCase();
-        const bright = Math.random();
-        fxCtx.fillStyle = bright > 0.85
-          ? `rgba(255,0,0,${0.5 + bright * 0.5})`
-          : `rgba(255,255,255,${0.05 + bright * 0.25})`;
-        const dy = Math.sin((col + row + progress * 10) * 0.8) * deform;
-        fxCtx.fillText(val, col * 28, row * fontSize + dy);
+function drawThermal(fxCtx, now) {
+  if (!cameraActive || !pixelData) {
+    // Sin cámara: noise thermal animado
+    fxCtx.clearRect(0, 0, W, H);
+    const t = now * 0.001;
+    for (let y = 0; y < H; y += 4) {
+      for (let x = 0; x < W; x += 4) {
+        const v = (Math.sin(x*0.02 + t) + Math.cos(y*0.015 - t*0.7) + 2) / 4;
+        const [r,g,b] = thermalColor(v * 255);
+        fxCtx.fillStyle = `rgb(${r},${g},${b})`;
+        fxCtx.fillRect(x, y, 4, 4);
       }
     }
     return;
   }
 
-  const fw = hexFrame.width;
-  const fh = hexFrame.height;
+  const progress = 1 - (modeUntil - now) / 4000;
 
-  for (let py = 0; py < fh; py++) {
-    for (let px = 0; px < fw; px++) {
-      const idx   = (py * fw + (fw - 1 - px)) * 4; // mirror
-      const r     = hexFrame.data[idx];
-      const g     = hexFrame.data[idx+1];
-      const b     = hexFrame.data[idx+2];
-      const luma  = (r * 0.299 + g * 0.587 + b * 0.114) / 255;
-      const hex   = ((r << 16) | (g << 8) | b).toString(16).padStart(6,'0').toUpperCase();
+  // Dibujar la cámara procesada como thermal
+  const tmpCanvas = document.createElement('canvas');
+  tmpCanvas.width  = sampleW;
+  tmpCanvas.height = sampleH;
+  const tmpCtx = tmpCanvas.getContext('2d');
+  tmpCtx.drawImage(video, 0, 0, sampleW, sampleH);
+  const frame = tmpCtx.getImageData(0, 0, sampleW, sampleH);
+  const data  = frame.data;
 
-      const sx = (px / fw) * W;
-      const sy = (py / fh) * H;
-      const dy = Math.sin((px + py * 0.5 + progress * 15) * 0.4) * deform;
+  // Aplicar paleta thermal pixel a pixel
+  for (let i = 0; i < data.length; i += 4) {
+    const luma = data[i]*0.299 + data[i+1]*0.587 + data[i+2]*0.114;
+    // Contrastar
+    const boosted = Math.min(255, luma * 1.6);
+    const [r,g,b] = thermalColor(boosted);
+    data[i]   = r;
+    data[i+1] = g;
+    data[i+2] = b;
+  }
+  tmpCtx.putImageData(frame, 0, 0);
 
-      if (luma > 0.15) {
-        fxCtx.fillStyle = luma > 0.6
-          ? `rgba(255,${Math.floor(luma*80)},${Math.floor(luma*40)},${0.4 + luma * 0.6})`
-          : `rgba(255,255,255,${0.08 + luma * 0.4})`;
-        fxCtx.fillText(hex, sx, sy + dy);
-      }
-    }
+  // Escalar al canvas fx con mirror
+  fxCtx.clearRect(0, 0, W, H);
+  fxCtx.save();
+  fxCtx.scale(-1, 1);
+  fxCtx.drawImage(tmpCanvas, -W, 0, W, H);
+  fxCtx.restore();
+
+  // Scanlines encima
+  for (let y = 0; y < H; y += 3) {
+    fxCtx.fillStyle = 'rgba(0,0,0,0.25)';
+    fxCtx.fillRect(0, y, W, 1);
   }
 
-  // Timestamp corriendo
-  fxCtx.fillStyle = 'rgba(255,0,0,0.7)';
-  fxCtx.font = '10px Courier New';
-  fxCtx.fillText(`0x${Date.now().toString(16).toUpperCase()}`, 16, H - 14);
-}
-
-// ─── IKEDA — DATA STREAM + NOISE ─────────────────────────────────────────────
-function buildIkeda() {
-  // Columnas de datos binarios cayendo
-  ikedaColumns = [];
-  const colCount = Math.floor(W / 11);
-  for (let i = 0; i < colCount; i++) {
-    ikedaColumns.push({
-      x: i * 11,
-      y: Math.random() * -H,
-      speed: 4 + Math.random() * 12,
-      chars: Array.from({length: 40}, () => Math.random() > 0.5 ? '1' : '0'),
-      bright: Math.random() > 0.7,
-    });
-  }
-  // Partículas de ruido
-  ikedaParticles = Array.from({length: 600}, () => ({
-    x: Math.random() * W,
-    y: Math.random() * H,
-    size: Math.random() > 0.92 ? 3 : 1,
-    alpha: 0.2 + Math.random() * 0.8,
-    vx: (Math.random() - 0.5) * 0.5,
-    vy: (Math.random() - 0.5) * 0.5,
-  }));
-}
-
-function drawIkeda(fxCtx, now) {
-  const progress = 1 - (modeUntil - now) / 5000;
-
-  // Fondo con trail
-  fxCtx.fillStyle = 'rgba(0,0,0,0.25)';
-  fxCtx.fillRect(0, 0, W, H);
-
-  fxCtx.font = '10px Courier New';
-
-  // Columnas binarias
-  for (let col of ikedaColumns) {
-    col.y += col.speed;
-    if (col.y > H + 400) col.y = -Math.random() * H;
-
-    for (let i = 0; i < col.chars.length; i++) {
-      const cy = col.y + i * 10;
-      if (cy < 0 || cy > H) continue;
-      col.chars[i] = Math.random() > 0.96 ? (Math.random() > 0.5 ? '1' : '0') : col.chars[i];
-      const head = i === 0;
-      fxCtx.fillStyle = head
-        ? '#fff'
-        : col.bright
-          ? `rgba(255,255,255,${0.15 + (1 - i/col.chars.length) * 0.5})`
-          : `rgba(255,255,255,${0.04 + (1 - i/col.chars.length) * 0.15})`;
-      fxCtx.fillText(col.chars[i], col.x, cy);
-    }
+  // Glitch horizontal ocasional
+  if (Math.random() < 0.08) {
+    const sy = Math.floor(Math.random() * H);
+    const sh = 2 + Math.floor(Math.random() * 8);
+    const dx = (Math.random()-0.5) * 40;
+    fxCtx.drawImage(fxCtx.canvas, 0, sy, W, sh, dx, sy, W, sh);
   }
 
-  // Partículas de ruido
-  fxCtx.shadowBlur = 0;
-  for (let p of ikedaParticles) {
-    p.x += p.vx; p.y += p.vy;
-    if (p.x < 0) p.x = W; if (p.x > W) p.x = 0;
-    if (p.y < 0) p.y = H; if (p.y > H) p.y = 0;
-    const flicker = Math.random() > 0.85 ? 0 : p.alpha;
-    fxCtx.fillStyle = `rgba(255,255,255,${flicker})`;
-    fxCtx.fillRect(p.x, p.y, p.size, p.size);
-  }
-
-  // Líneas horizontales de scan ocasionales
-  if (Math.random() < 0.06) {
-    const ly = Math.floor(Math.random() * H);
-    fxCtx.fillStyle = `rgba(255,255,255,${0.1 + Math.random() * 0.3})`;
-    fxCtx.fillRect(0, ly, W, 1);
-  }
-
-  // Datos en esquinas estilo Ikeda
-  fxCtx.fillStyle = 'rgba(255,255,255,0.6)';
+  // Texto de datos encima
+  fxCtx.fillStyle = 'rgba(255,255,255,0.55)';
   fxCtx.font = '9px Courier New';
-  const ts = Date.now();
-  fxCtx.fillText(`${ts.toString(2).slice(-24)}`, 10, 14);
-  fxCtx.fillText(`0x${ts.toString(16).toUpperCase().padStart(12,'0')}`, 10, 26);
-  fxCtx.fillText(`ERR 0N1+ :: SIGNAL CORRUPT :: ${(progress*100).toFixed(1)}%`, 10, H - 12);
+  fxCtx.fillText(`THERMAL SCAN :: 0x${Date.now().toString(16).toUpperCase()}`, 10, H - 24);
+  fxCtx.fillText(`ERR 0N1+ :: SIGNAL ${(progress*100).toFixed(0)}%`, 10, H - 12);
+
+  // Ruido RGB en bordes
+  fxCtx.fillStyle = `rgba(255,0,0,${0.1 + Math.random()*0.15})`;
+  fxCtx.fillRect(0, 0, W, 2);
+  fxCtx.fillRect(0, H-2, W, 2);
 }
 
 // ─── MATRIX ENGINE ────────────────────────────────────────────────────────────
@@ -364,11 +308,11 @@ let W, H, cols, rows, fontSize, cw;
 let cells = [], activePhrases = [];
 let motionLevel = 0, prevFrame = null;
 let cameraActive = false, pixelData = null;
-let sampleW = 120, sampleH = 90;
+const sampleW = 120, sampleH = 90;
 
 const CHARS        = '01アイウエオカキクケコABCDEFGHIJKLMNOPQRSTUVWXYZ?!@#$%&[]{}01110100';
 const BRIGHT_CHARS = '@#%&WMB80';
-const GLITCH_CHARS = '▓▒░█▄▀■□▪▫◆◇';
+const GLITCH_CHARS = '▓▒░█▄▀■□▪◆';
 
 const ALL_PHRASES = [
   '¿Qué harías tú en una revolución?',
@@ -423,11 +367,11 @@ function sampleVideo() {
 
 function getPixelBrightness(r, c) {
   if (!pixelData) return 0;
-  const px = Math.floor((c / cols) * sampleW);
-  const py = Math.floor((r / rows) * sampleH);
-  const mx = sampleW - 1 - px;
+  const px  = Math.floor((c / cols) * sampleW);
+  const py  = Math.floor((r / rows) * sampleH);
+  const mx  = sampleW - 1 - px;
   const idx = (py * sampleW + mx) * 4;
-  let luma = pixelData[idx]*0.299 + pixelData[idx+1]*0.587 + pixelData[idx+2]*0.114;
+  let luma  = pixelData[idx]*0.299 + pixelData[idx+1]*0.587 + pixelData[idx+2]*0.114;
   luma = (luma - 128) * 1.8 + 128;
   return Math.max(0, Math.min(255, luma)) / 255;
 }
@@ -451,8 +395,8 @@ function spawnPhrase() {
     chars, r: rr, c: rc,
     born: Date.now(),
     life: 4500 + Math.random() * 2500,
-    drift: (Math.random() - 0.5) * 0.06,
-    fr: rr + (Math.random() - 0.5) * 18,
+    drift: (Math.random()-0.5) * 0.06,
+    fr: rr + (Math.random()-0.5) * 18,
   });
 }
 
@@ -462,14 +406,13 @@ function updatePhrases(motion) {
   if (motion > 0.002 && activePhrases.length < 14 && Math.random() < 0.42) spawnPhrase();
   activePhrases.forEach(p => {
     p.r += (p.fr - p.r) * 0.012 + p.drift * motion * 10;
-    p.r  = Math.max(0, Math.min(rows - 1, p.r));
+    p.r  = Math.max(0, Math.min(rows-1, p.r));
   });
 }
 
 function getRedChar(r, c) {
   for (let p of activePhrases) {
-    const age = Date.now() - p.born;
-    if (age / p.life > 0.95) continue;
+    if ((Date.now() - p.born) / p.life > 0.95) continue;
     if (Math.round(p.r) !== r) continue;
     const ci = c - p.c;
     if (ci >= 0 && ci < p.chars.length) return p.chars[ci];
@@ -477,16 +420,48 @@ function getRedChar(r, c) {
   return null;
 }
 
+// ─── MODO LEVE: cámara rojo/negro encima del matrix ──────────────────────────
+function drawCameraRedBlack(fxCtx) {
+  if (!cameraActive || !pixelData) {
+    fxCtx.clearRect(0, 0, W, H);
+    return;
+  }
+  // Dibujar cámara como imagen rojo/negro
+  const tmp = document.createElement('canvas');
+  tmp.width = sampleW; tmp.height = sampleH;
+  const tctx = tmp.getContext('2d');
+  tctx.drawImage(video, 0, 0, sampleW, sampleH);
+  const frame = tctx.getImageData(0, 0, sampleW, sampleH);
+  const data  = frame.data;
+  for (let i = 0; i < data.length; i += 4) {
+    const luma = data[i]*0.299 + data[i+1]*0.587 + data[i+2]*0.114;
+    const v    = Math.min(255, luma * 2.2);
+    data[i]   = v;   // rojo
+    data[i+1] = 0;   // verde = 0
+    data[i+2] = 0;   // azul  = 0
+  }
+  tctx.putImageData(frame, 0, 0);
+
+  fxCtx.clearRect(0, 0, W, H);
+  fxCtx.globalAlpha = 0.65;
+  fxCtx.save();
+  fxCtx.scale(-1, 1);
+  fxCtx.drawImage(tmp, -W, 0, W, H);
+  fxCtx.restore();
+  fxCtx.globalAlpha = 1;
+
+  // Scanlines
+  for (let y = 0; y < H; y += 2) {
+    fxCtx.fillStyle = 'rgba(0,0,0,0.18)';
+    fxCtx.fillRect(0, y, W, 1);
+  }
+}
+
+// ─── DRAW MATRIX ─────────────────────────────────────────────────────────────
 function drawMatrix() {
   const now      = Date.now();
   const isGlitch = now < glitchUntil;
   const level    = isGlitch ? glitchLevel : 0;
-
-  if (flashActive) {
-    ctx.fillStyle = 'rgba(255,255,255,0.2)';
-    ctx.fillRect(0, 0, W, H);
-    return;
-  }
 
   ctx.fillStyle = level > 0 ? 'rgba(0,0,0,0.04)' : 'rgba(0,0,0,0.08)';
   ctx.fillRect(0, 0, W, H);
@@ -508,7 +483,7 @@ function drawMatrix() {
           cell.timer = 2 + Math.random() * 5;
         } else {
           cell.ch    = isBody ? randBright() : randChar();
-          cell.timer = isBody ? (4 + Math.random() * 10) : (10 + Math.random() * 34);
+          cell.timer = isBody ? (4 + Math.random()*10) : (10 + Math.random()*34);
         }
       }
 
@@ -517,54 +492,50 @@ function drawMatrix() {
       const red  = getRedChar(r, c);
 
       if (red !== null) {
-        ctx.fillStyle  = (level === 3 && Math.random() < 0.15) ? '#fff' : '#ff2a2a';
-        ctx.shadowBlur = level > 0 ? 10 : 5;
-        ctx.shadowColor= '#ff0000';
+        ctx.fillStyle   = '#ff2a2a';
+        ctx.shadowBlur  = level > 0 ? 10 : 5;
+        ctx.shadowColor = '#ff0000';
         ctx.fillText(red, xPos, yPos);
-        ctx.shadowBlur = 0;
+        ctx.shadowBlur  = 0;
       } else if (rowCorrupt) {
-        ctx.fillStyle = `rgba(255,${Math.floor(Math.random()*40)},${Math.floor(Math.random()*40)},0.75)`;
+        ctx.fillStyle = `rgba(255,${Math.floor(Math.random()*40)},0,0.8)`;
         ctx.fillText(cell.ch, xPos, yPos);
       } else if (isBody) {
-        const alpha = 0.18 + bright * 0.35 + (level > 0 ? Math.random() * 0.2 : 0);
-        ctx.fillStyle  = `rgba(255,255,255,${alpha})`;
-        ctx.shadowBlur = level > 0 ? 4 : 2;
-        ctx.shadowColor= 'rgba(255,255,255,0.5)';
+        const a = 0.18 + bright * 0.35 + (level > 0 ? Math.random()*0.2 : 0);
+        ctx.fillStyle   = `rgba(255,255,255,${a})`;
+        ctx.shadowBlur  = level > 0 ? 4 : 2;
+        ctx.shadowColor = 'rgba(255,255,255,0.5)';
         ctx.fillText(cell.ch, xPos, yPos);
-        ctx.shadowBlur = 0;
+        ctx.shadowBlur  = 0;
       } else {
-        const a = 0.03 + Math.random() * (0.08 + level * 0.05);
-        ctx.fillStyle = `rgba(255,255,255,${a})`;
+        ctx.fillStyle = `rgba(255,255,255,${0.03 + Math.random()*(0.07 + level*0.05)})`;
         ctx.fillText(cell.ch, xPos, yPos);
       }
     }
 
-    // Línea de error horizontal
-    if (level === 3 && Math.random() < 0.015) {
-      ctx.fillStyle = `rgba(255,0,0,${0.3 + Math.random() * 0.4})`;
+    if (level === 3 && Math.random() < 0.012) {
+      ctx.fillStyle = `rgba(255,0,0,${0.3 + Math.random()*0.4})`;
       ctx.fillRect(0, r * fontSize, W, 1);
     }
   }
 }
 
-// ─── LOOP PRINCIPAL ───────────────────────────────────────────────────────────
+// ─── LOOP ─────────────────────────────────────────────────────────────────────
 function loop() {
-  const now = Date.now();
-  pixelData  = sampleVideo();
-  const raw  = detectMotion(pixelData);
+  const now   = Date.now();
+  pixelData   = sampleVideo();
+  const raw   = detectMotion(pixelData);
   motionLevel += (raw - motionLevel) * 0.18;
   updateAudioMotion(motionLevel);
   updatePhrases(motionLevel);
   drawMatrix();
 
-  // Capa fx encima del matrix
   if (now < modeUntil) {
-    if (currentMode === 'medio')  drawWaveform(fxCtx, now);
-    if (currentMode === 'fuerte') drawHexSilueta(fxCtx, now);
-    if (currentMode === 'max')    drawIkeda(fxCtx, now);
-  } else if (fxCanvas.style.display !== 'none') {
+    if (currentMode === 'leve')   drawCameraRedBlack(fxCtx);
+    if (currentMode === 'medio')  drawLines(fxCtx, now);
+    if (currentMode === 'fuerte') drawThermal(fxCtx, now);
+  } else if (currentMode !== 'matrix') {
     fxCtx.clearRect(0, 0, W, H);
-    fxCanvas.style.display = 'none';
     currentMode = 'matrix';
     glitchLevel = 0;
   }
