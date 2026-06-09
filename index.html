@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>error de usuario 0N1+ — PURGATORIO N TEMPLE OS 2</title>
+<title>error de usuario 0N1+ </title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 html,body{width:100%;height:100%;background:#000;overflow:hidden;touch-action:none}
@@ -128,58 +128,80 @@ function triggerMode(nivel) {
 // ─── MODO LEVE: cámara rojo/negro + matrix encima ─────────────────────────────
 // (se dibuja directo en el matrix canvas con compositing)
 
-// ─── MODO MEDIO: cámara duplicada + wireframe verde neón ─────────────────────
-function buildLines() {} // no necesita init
+// ─── MODO MEDIO: wireframe verde agresivo + deformación ──────────────────────
+function buildLines() {}
+
+// Canvas offscreen para procesar la silueta
+let wireCanvas = null, wireCtx = null;
 
 function drawLines(fxCtx, now) {
   fxCtx.clearRect(0, 0, W, H);
-  if (!cameraActive || video.readyState < 2) return;
 
-  const progress = 1 - (modeUntil - now) / 3000;
-  const pulse    = 0.6 + Math.sin(now * 0.008) * 0.4;
+  const pulse = 0.7 + Math.sin(now * 0.006) * 0.3;
+  const t     = now * 0.001;
 
-  // ── 1. Cámara duplicada con offset (3 capas) ──────────────────────────────
-  const offsets = [
-    { dx: -W * 0.08, dy: -H * 0.04, alpha: 0.25, hue: 'rgba(0,255,80,' },
-    { dx:  W * 0.08, dy:  H * 0.04, alpha: 0.25, hue: 'rgba(0,200,255,' },
-    { dx:  0,        dy:  0,        alpha: 0.45, hue: null },
+  if (!cameraActive || !pixelData || video.readyState < 2) return;
+
+  // ── Offscreen canvas del tamaño de muestra ────────────────────────────────
+  if (!wireCanvas) {
+    wireCanvas = document.createElement('canvas');
+    wireCtx    = wireCanvas.getContext('2d');
+  }
+  wireCanvas.width  = sampleW;
+  wireCanvas.height = sampleH;
+  wireCtx.drawImage(video, 0, 0, sampleW, sampleH);
+  const frame = wireCtx.getImageData(0, 0, sampleW, sampleH);
+  const data  = frame.data;
+
+  // ── Convertir a blanco/negro duro (umbral) ────────────────────────────────
+  for (let i = 0; i < data.length; i += 4) {
+    const luma = data[i]*0.299 + data[i+1]*0.587 + data[i+2]*0.114;
+    const v    = luma > 40 ? 255 : 0;
+    data[i] = data[i+1] = data[i+2] = v;
+  }
+  wireCtx.putImageData(frame, 0, 0);
+
+  // ── 1. SILUETA: dibujar en negro puro (fondo negro = solo la persona) ─────
+  fxCtx.save();
+  fxCtx.scale(-1, 1);
+  // Imagen en escala de grises muy oscura como base
+  fxCtx.globalAlpha = 0.18;
+  fxCtx.drawImage(wireCanvas, -W, 0, W, H);
+  fxCtx.restore();
+  fxCtx.globalAlpha = 1;
+
+  // ── 2. COPIA FANTASMA desplazada (efecto duplicación agresivo) ────────────
+  const ghosts = [
+    { dx: W*0.06,  dy: -H*0.06, a: 0.18, scale: 1.04 },
+    { dx: -W*0.06, dy:  H*0.06, a: 0.14, scale: 0.97 },
   ];
-
-  for (const o of offsets) {
+  for (const g of ghosts) {
     fxCtx.save();
-    fxCtx.globalAlpha = o.alpha;
-    if (o.hue) {
-      // Tinte de color sobre la cámara
-      fxCtx.scale(-1, 1);
-      fxCtx.drawImage(video, -(W + o.dx), o.dy, W, H);
-      fxCtx.globalCompositeOperation = 'screen';
-      fxCtx.fillStyle = o.hue + '0.3)';
-      fxCtx.fillRect(-W + o.dx, o.dy, W, H);
-    } else {
-      fxCtx.scale(-1, 1);
-      fxCtx.drawImage(video, -W, 0, W, H);
-    }
+    fxCtx.globalAlpha = g.a * pulse;
+    fxCtx.translate(W/2 + g.dx, H/2 + g.dy);
+    fxCtx.scale(-g.scale, g.scale);
+    fxCtx.drawImage(wireCanvas, -W/2, -H/2, W, H);
     fxCtx.restore();
     fxCtx.globalAlpha = 1;
-    fxCtx.globalCompositeOperation = 'source-over';
   }
 
-  // ── 2. Extraer puntos de la silueta para el wireframe ─────────────────────
+  // ── 3. PUNTOS DE LA MALLA ─────────────────────────────────────────────────
   const pts = [];
-  const stepX = Math.floor(sampleW / 18);
-  const stepY = Math.floor(sampleH / 24);
+  const stepX = Math.floor(sampleW / 22);
+  const stepY = Math.floor(sampleH / 30);
 
   for (let py = 0; py < sampleH; py += stepY) {
     for (let px = 0; px < sampleW; px += stepX) {
-      const mx   = sampleW - 1 - px;
+      const mx   = sampleW - 1 - px; // mirror
       const idx  = (py * sampleW + mx) * 4;
-      const luma = pixelData
-        ? pixelData[idx]*0.299 + pixelData[idx+1]*0.587 + pixelData[idx+2]*0.114
-        : 0;
-      if (luma > 45) {
+      const luma = pixelData[idx]*0.299 + pixelData[idx+1]*0.587 + pixelData[idx+2]*0.114;
+      if (luma > 35) {
+        // Deformación: desplazamiento ondulado por posición + tiempo
+        const deformX = Math.sin(py * 0.18 + t * 2.5) * W * 0.025;
+        const deformY = Math.cos(px * 0.22 + t * 1.8) * H * 0.018;
         pts.push({
-          x: (px / sampleW) * W,
-          y: (py / sampleH) * H,
+          x: (px / sampleW) * W + deformX,
+          y: (py / sampleH) * H + deformY,
           l: luma,
         });
       }
@@ -188,9 +210,9 @@ function drawLines(fxCtx, now) {
 
   if (pts.length === 0) return;
 
-  // ── 3. Wireframe: conectar puntos cercanos ────────────────────────────────
-  const maxDist = W * 0.12;
-  fxCtx.shadowBlur  = 8;
+  // ── 4. WIREFRAME: conectar puntos con líneas verdes gruesas ───────────────
+  const maxDist = W * 0.1;
+  fxCtx.shadowBlur  = 14;
   fxCtx.shadowColor = '#00ff50';
 
   for (let i = 0; i < pts.length; i++) {
@@ -199,9 +221,11 @@ function drawLines(fxCtx, now) {
       const dy   = pts[i].y - pts[j].y;
       const dist = Math.sqrt(dx*dx + dy*dy);
       if (dist < maxDist) {
-        const a = (1 - dist / maxDist) * 0.7 * pulse;
+        const ratio = 1 - dist / maxDist;
+        const a     = ratio * 0.9 * pulse;
+        const w     = ratio > 0.7 ? 2.5 : ratio > 0.4 ? 1.5 : 0.8;
         fxCtx.strokeStyle = `rgba(0,255,80,${a})`;
-        fxCtx.lineWidth   = dist < maxDist * 0.4 ? 1.2 : 0.5;
+        fxCtx.lineWidth   = w;
         fxCtx.beginPath();
         fxCtx.moveTo(pts[i].x, pts[i].y);
         fxCtx.lineTo(pts[j].x, pts[j].y);
@@ -210,24 +234,48 @@ function drawLines(fxCtx, now) {
     }
   }
 
-  // ── 4. Puntos del wireframe ───────────────────────────────────────────────
+  // ── 5. NODOS: puntos brillantes en intersecciones ─────────────────────────
   for (const p of pts) {
-    const bright = p.l > 180;
-    fxCtx.fillStyle   = bright ? `rgba(255,255,255,${0.8 * pulse})` : `rgba(0,255,80,${0.5 * pulse})`;
-    fxCtx.shadowBlur  = bright ? 10 : 4;
-    fxCtx.shadowColor = bright ? '#fff' : '#00ff50';
+    const isHot = p.l > 160;
+    fxCtx.fillStyle   = isHot ? `rgba(255,255,255,${pulse})` : `rgba(0,255,80,${0.7*pulse})`;
+    fxCtx.shadowBlur  = isHot ? 16 : 6;
+    fxCtx.shadowColor = isHot ? '#ffffff' : '#00ff50';
     fxCtx.beginPath();
-    fxCtx.arc(p.x, p.y, bright ? 2.5 : 1.5, 0, Math.PI*2);
+    fxCtx.arc(p.x, p.y, isHot ? 3 : 2, 0, Math.PI*2);
     fxCtx.fill();
+  }
+
+  // ── 6. LÍNEAS LARGAS desde nodos calientes hacia bordes ───────────────────
+  const hotPts = pts.filter(p => p.l > 150);
+  fxCtx.shadowBlur  = 10;
+  fxCtx.shadowColor = '#00ff50';
+  for (const p of hotPts) {
+    if (Math.random() > 0.35) continue; // no todas, para no saturar
+    const angle  = Math.atan2(p.y - H/2, p.x - W/2) + (Math.random()-0.5) * 0.8;
+    const length = W * (0.4 + Math.random() * 0.5);
+    fxCtx.strokeStyle = `rgba(0,255,80,${0.25 + Math.random()*0.35})`;
+    fxCtx.lineWidth   = 0.6 + Math.random();
+    fxCtx.beginPath();
+    fxCtx.moveTo(p.x, p.y);
+    fxCtx.lineTo(p.x + Math.cos(angle)*length, p.y + Math.sin(angle)*length);
+    fxCtx.stroke();
   }
 
   fxCtx.shadowBlur = 0;
 
-  // ── 5. Texto de datos encima ──────────────────────────────────────────────
-  fxCtx.fillStyle = 'rgba(0,255,80,0.6)';
-  fxCtx.font = '9px Courier New';
-  fxCtx.fillText(`SCAN :: ${pts.length.toString().padStart(4,'0')} pts`, 10, H - 24);
-  fxCtx.fillText(`0x${Date.now().toString(16).toUpperCase()}`, 10, H - 12);
+  // ── 7. GLITCH horizontal ocasional ───────────────────────────────────────
+  if (Math.random() < 0.1) {
+    const gy  = Math.floor(Math.random() * H);
+    const gh  = 2 + Math.floor(Math.random() * 6);
+    const gdx = (Math.random()-0.5) * W * 0.15;
+    fxCtx.drawImage(fxCtx.canvas, 0, gy, W, gh, gdx, gy, W, gh);
+  }
+
+  // ── 8. Datos en esquina ───────────────────────────────────────────────────
+  fxCtx.fillStyle = 'rgba(0,255,80,0.55)';
+  fxCtx.font      = '9px Courier New';
+  fxCtx.fillText(`MESH ${pts.length.toString().padStart(4,'0')} :: DEFORM ON`, 10, H-24);
+  fxCtx.fillText(`0x${Date.now().toString(16).toUpperCase()}`, 10, H-12);
 }
 
 // ─── MODO FUERTE: thermal / colores falsos ────────────────────────────────────
