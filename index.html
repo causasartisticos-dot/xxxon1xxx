@@ -129,13 +129,10 @@ function triggerMode(nivel) {
 // (se dibuja directo en el matrix canvas con compositing)
 
 // ─── MODO MEDIO: datamosh — corrupción de imagen, bloques desplazados ────────
-// Técnica: capturar frame, desplazar bloques de píxeles por canales separados,
-// acumular frames anteriores (motion blur de datamosh), pixel sorting horizontal
-let dmPrevFrame = null;   // frame anterior para motion blending
-let dmAccum = null;       // canvas de acumulación entre frames
+let dmPrevFrame = null;
+let dmAccum = null;
 let dmAccumCtx = null;
 function buildLines() {
-  // Inicializar canvas de acumulación cuando se activa el modo
   if (!dmAccum) {
     dmAccum = document.createElement('canvas');
     dmAccum.width = W; dmAccum.height = H;
@@ -149,13 +146,11 @@ function buildLines() {
 function drawLines(fxCtx, now) {
   const t = now * 0.001;
 
-  // Sin cámara: datamosh de noise puro
   if (!cameraActive || !pixelData || video.readyState < 2) {
     _drawNoiseDatmosh(fxCtx, now);
     return;
   }
 
-  // ── Capturar frame actual ────────────────────────────────────────────────
   const capW = Math.min(W, 640), capH = Math.min(H, 480);
   const src = document.createElement('canvas');
   src.width = capW; src.height = capH;
@@ -165,44 +160,38 @@ function drawLines(fxCtx, now) {
   const frame = sctx.getImageData(0, 0, capW, capH);
   const data  = frame.data;
 
-  // ── PASO 1: Channel shift — separar RGB y desplazarlos ───────────────────
-  // Extraer canales por separado y desplazarlos horizontalmente
-  const shiftR = Math.floor(Math.sin(t * 1.3) * 55 + Math.random() * 35);
-  const shiftB = Math.floor(Math.cos(t * 0.9) * 65 + Math.random() * 28);
+  // ── PASO 1: Channel shift agresivo ───────────────────────────────────────
+  const shiftR = Math.floor(Math.sin(t * 1.3) * 90 + Math.random() * 55);
+  const shiftB = Math.floor(Math.cos(t * 0.9) * 110 + Math.random() * 45);
   const shifted = new Uint8ClampedArray(data.length);
 
   for (let y = 0; y < capH; y++) {
     for (let x = 0; x < capW; x++) {
       const i = (y * capW + x) * 4;
-      // Canal rojo: desplazado a la derecha
       const xR = Math.min(capW - 1, x + shiftR);
       const iR = (y * capW + xR) * 4;
-      // Canal azul: desplazado a la izquierda
       const xB = Math.max(0, x - shiftB);
       const iB = (y * capW + xB) * 4;
-      shifted[i]   = data[iR];         // R desplazado
-      shifted[i+1] = data[i+1];        // G sin mover
-      shifted[i+2] = data[iB+2];       // B desplazado opuesto
+      shifted[i]   = data[iR];
+      shifted[i+1] = data[i+1];
+      shifted[i+2] = data[iB+2];
       shifted[i+3] = 255;
     }
   }
 
-  // ── PASO 2: Pixel sorting por filas — ordena pixeles por brillo ──────────
-  // Solo en algunas filas para que no se vea estático
+  // ── PASO 2: Pixel sorting en 90% de filas, segmentos largos ─────────────
   const sortedData = new Uint8ClampedArray(shifted);
-  const numSortRows = Math.floor(capH * 0.75); // 75% de filas se sortean
+  const numSortRows = Math.floor(capH * 0.90);
   for (let si = 0; si < numSortRows; si++) {
     const y = Math.floor(Math.random() * capH);
-    // Extraer fila
     const row = [];
     for (let x = 0; x < capW; x++) {
       const i = (y * capW + x) * 4;
       const luma = shifted[i]*0.299 + shifted[i+1]*0.587 + shifted[i+2]*0.114;
       row.push({ luma, r: shifted[i], g: shifted[i+1], b: shifted[i+2] });
     }
-    // Ordenar segmento aleatorio por brillo
-    const start = Math.floor(Math.random() * capW * 0.5);
-    const len   = Math.floor(capW * (0.3 + Math.random() * 0.7));
+    const start = Math.floor(Math.random() * capW * 0.3);
+    const len   = Math.floor(capW * (0.5 + Math.random() * 0.5));
     const seg   = row.slice(start, start + len).sort((a,b) => a.luma - b.luma);
     for (let x = 0; x < seg.length; x++) {
       const i = (y * capW + start + x) * 4;
@@ -213,18 +202,16 @@ function drawLines(fxCtx, now) {
     }
   }
 
-  // ── PASO 3: Block displacement — bloques de píxeles desplazados ──────────
-  // Como datamosh de video: copiar bloques de posiciones aleatorias
+  // ── PASO 3: Block displacement grande ────────────────────────────────────
   const blockData = new Uint8ClampedArray(sortedData);
-  const numBlocks = 20 + Math.floor(Math.random() * 28);
+  const numBlocks = 30 + Math.floor(Math.random() * 35);
   for (let b = 0; b < numBlocks; b++) {
     const bx  = Math.floor(Math.random() * (capW - 60));
     const by  = Math.floor(Math.random() * (capH - 20));
-    const bw  = 40 + Math.floor(Math.random() * 180);
-    const bh  = 4  + Math.floor(Math.random() * 40);
-    const dx  = Math.floor((Math.random() - 0.5) * capW * 0.7);
-    const dy  = Math.floor((Math.random() - 0.5) * capH * 0.25);
-    // Copiar bloque con offset
+    const bw  = 60 + Math.floor(Math.random() * 220);
+    const bh  = 3  + Math.floor(Math.random() * 55);
+    const dx  = Math.floor((Math.random() - 0.5) * capW * 0.85);
+    const dy  = Math.floor((Math.random() - 0.5) * capH * 0.35);
     for (let ry = 0; ry < bh; ry++) {
       const sy = Math.min(capH-1, by + ry);
       const ty = Math.min(capH-1, Math.max(0, by + ry + dy));
@@ -233,79 +220,71 @@ function drawLines(fxCtx, now) {
         const tx = Math.min(capW-1, Math.max(0, bx + rx + dx));
         const si2 = (sy * capW + sx) * 4;
         const ti  = (ty * capW + tx) * 4;
-        // Mezcla con colores alterados — aquí entra el color saturado
-        blockData[ti]   = Math.min(255, sortedData[si2] * 3.2);
-        blockData[ti+1] = Math.min(255, sortedData[si2+1] * 0.3);
-        blockData[ti+2] = Math.min(255, sortedData[si2+2] * 3.8);
+        blockData[ti]   = Math.min(255, sortedData[si2]   * 3.8);
+        blockData[ti+1] = Math.min(255, sortedData[si2+1] * 0.2);
+        blockData[ti+2] = Math.min(255, sortedData[si2+2] * 4.2);
         blockData[ti+3] = 255;
       }
     }
   }
 
-  // ── PASO 4: Colorize — mapear a paleta datamosh saturada ─────────────────
-  // Paleta: verde neón, magenta, amarillo, cian — como las imágenes de referencia
+  // ── PASO 4: Colorize saturado ─────────────────────────────────────────────
   for (let i = 0; i < blockData.length; i += 4) {
-    const r = blockData[i], g = blockData[i+1], b = blockData[i+2];
-    // Saturar canales
-    const maxC = Math.max(r, g, b);
-    const boost = 2.4;
-    blockData[i]   = Math.min(255, r * boost);
-    blockData[i+1] = Math.min(255, g * boost);
-    blockData[i+2] = Math.min(255, b * boost);
+    const boost = 2.8;
+    blockData[i]   = Math.min(255, blockData[i]   * boost);
+    blockData[i+1] = Math.min(255, blockData[i+1] * boost);
+    blockData[i+2] = Math.min(255, blockData[i+2] * boost);
   }
 
-  // ── Poner en canvas temporal y escalar ────────────────────────────────────
   const imgData = new ImageData(blockData, capW, capH);
   sctx.putImageData(imgData, 0, 0);
 
-  // ── Motion blend con frame anterior (corazón del datamosh) ───────────────
-  if (!dmAccum || dmAccum.width !== W) buildLines();
-  // Pintar el frame actual
+  // ── Frame base — imagen procesada con opacidad reducida para que se vea la persona
   fxCtx.clearRect(0, 0, W, H);
+  fxCtx.globalAlpha = 0.75;
   fxCtx.drawImage(src, 0, 0, W, H);
+  fxCtx.globalAlpha = 1;
 
-  // Mezclar con acumulación previa (frame ghosting)
+  // ── Ghost frame acumulado ────────────────────────────────────────────────
   if (dmPrevFrame) {
-    fxCtx.globalAlpha = 0.62;
+    fxCtx.globalAlpha = 0.55;
     fxCtx.globalCompositeOperation = 'screen';
     fxCtx.drawImage(dmPrevFrame, 0, 0, W, H);
     fxCtx.globalAlpha = 1;
     fxCtx.globalCompositeOperation = 'source-over';
   }
 
-  // ── PASO 5: Horizontal glitch strips — franjas desplazadas sobre render ───
-  const numStrips = 10 + Math.floor(Math.random() * 18);
+  // ── Glitch strips ────────────────────────────────────────────────────────
+  const numStrips = 14 + Math.floor(Math.random() * 22);
   for (let s = 0; s < numStrips; s++) {
-    if (Math.random() > 0.75) continue;
+    if (Math.random() > 0.78) continue;
     const sy  = Math.floor(Math.random() * H);
-    const sh  = 1 + Math.floor(Math.random() * 28);
-    const sdx = (Math.random() - 0.5) * W * 0.45;
+    const sh  = 1 + Math.floor(Math.random() * 35);
+    const sdx = (Math.random() - 0.5) * W * 0.55;
     fxCtx.drawImage(fxCtx.canvas, 0, sy, W, sh, sdx, sy, W, sh);
   }
 
-  // ── Color aberration flash — destello de color sobre toda la pantalla ─────
-  if (Math.random() < 0.18) {
+  // ── Color flash ──────────────────────────────────────────────────────────
+  if (Math.random() < 0.22) {
     const flashColors = [
-      'rgba(255,0,200,0.28)', 'rgba(0,255,80,0.22)',
-      'rgba(255,220,0,0.25)', 'rgba(0,200,255,0.22)'
+      'rgba(255,0,200,0.32)', 'rgba(0,255,80,0.26)',
+      'rgba(255,220,0,0.28)', 'rgba(0,200,255,0.26)'
     ];
     fxCtx.fillStyle = flashColors[Math.floor(Math.random() * flashColors.length)];
     fxCtx.fillRect(0, 0, W, H);
   }
 
-  // ── Guardar frame para siguiente ciclo ────────────────────────────────────
+  // ── Guardar frame ────────────────────────────────────────────────────────
   dmPrevFrame = document.createElement('canvas');
   dmPrevFrame.width = W; dmPrevFrame.height = H;
   dmPrevFrame.getContext('2d').drawImage(fxCtx.canvas, 0, 0);
 
-  // ── HUD mínimo ────────────────────────────────────────────────────────────
   fxCtx.fillStyle = 'rgba(255,220,0,0.4)';
   fxCtx.font = '9px Courier New';
   fxCtx.fillText(`DATAMOSH :: ERR 0x${Date.now().toString(16).slice(-6).toUpperCase()}`, 10, H-12);
 }
 
 function _drawNoiseDatmosh(fxCtx, now) {
-  // Sin cámara: bloques de ruido colorido que se mueven
   const bSize = 8;
   const cols2 = Math.ceil(W / bSize);
   const rows2 = Math.ceil(H / bSize);
@@ -320,7 +299,6 @@ function _drawNoiseDatmosh(fxCtx, now) {
       fxCtx.fillRect(c * bSize, r * bSize, bSize, bSize);
     }
   }
-  // Glitch strips
   for (let i = 0; i < 5; i++) {
     if (Math.random() < 0.5) {
       const gy = Math.floor(Math.random() * H);
