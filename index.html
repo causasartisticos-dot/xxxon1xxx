@@ -3,12 +3,13 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title> +3rror de usuario 0N1+ </title>
+<title>error de usuario 0N1+ — PURGATORIO N TEMPLE OS 2</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 html,body{width:100%;height:100%;background:#000;overflow:hidden;touch-action:none}
 #video{position:fixed;top:-9999px;left:-9999px;width:1px;height:1px}
 #matrix-canvas{position:fixed;top:0;left:0;width:100%;height:100%;z-index:1}
+#fx-canvas{position:fixed;top:0;left:0;width:100%;height:100%;z-index:2;pointer-events:none;display:none}
 #start{
   position:fixed;top:0;left:0;width:100%;height:100%;
   background:#000;z-index:100;
@@ -18,13 +19,7 @@ html,body{width:100%;height:100%;background:#000;overflow:hidden;touch-action:no
 }
 #start-haiku{font-size:clamp(13px,3.5vw,17px);color:#fff;line-height:2.4;text-align:center;letter-spacing:0.05em}
 #start-haiku .red{color:#e00;font-weight:700}
-#start-sub{
-  font-size:16px;
-  color:#fff;
-  letter-spacing:0.4em;
-  text-align:center;
-  opacity:0.85;
-}
+#start-sub{font-size:13px;color:#fff;letter-spacing:0.4em;text-align:center;opacity:0.85}
 #start-btn{font-family:'Courier New',monospace;font-size:14px;color:#000;background:#e00;padding:12px 32px;letter-spacing:0.3em;border:none;cursor:pointer}
 </style>
 </head>
@@ -38,92 +33,344 @@ html,body{width:100%;height:100%;background:#000;overflow:hidden;touch-action:no
     <span class="red">Nadie te salvará</span>
   </div>
   <button id="start-btn" onclick="iniciar()">INICIAR</button>
-
-<div id="artist-tag">ON1</div>
-
-<div id="start-sub">{ 3rror de usuario } · ON1 · </div>
-
+  <div id="artist-tag" style="font-family:'Courier New',monospace;font-size:11px;color:#e00;letter-spacing:0.3em">ON1</div>
+  <div id="start-sub">3RROR DE USUARIO · ON1</div>
 </div>
-
 
 <video id="video" autoplay muted playsinline></video>
 <canvas id="matrix-canvas"></canvas>
+<canvas id="fx-canvas"></canvas>
 <canvas id="sample-canvas" style="display:none"></canvas>
 
 <script>
-// ─── AUDIO ENGINE — MP3 PLAYBACK ─────────────────────────────────────────────
-// Reproduce levantate_-_los_crudos.mp3 en loop
-// El volumen del ruido reacciona al movimiento de la cámara (igual que antes)
-
-let audioCtx, masterGain, noiseGain, noiseMotionTarget = 0.022;
+// ─── AUDIO ────────────────────────────────────────────────────────────────────
+let audioCtx, masterGain, noiseGain;
 let audioReady = false;
 
 function initAudio() {
   audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-
   masterGain = audioCtx.createGain();
   masterGain.gain.setValueAtTime(0, audioCtx.currentTime);
   masterGain.gain.linearRampToValueAtTime(0.85, audioCtx.currentTime + 2);
   masterGain.connect(audioCtx.destination);
 
-  // ── MP3 principal — Los Crudos: Levántate ────────────────────────────────
   const song = new Audio('levantate_-_los_crudos.mp3');
   song.loop = true;
-  song.volume = 1;
   const songSource = audioCtx.createMediaElementSource(song);
   songSource.connect(masterGain);
   song.play().catch(() => {});
 
-  // ── Ruido textural de fondo — reacciona al movimiento (muy sutil) ─────────
   const bufSize = audioCtx.sampleRate * 4;
   const buf = audioCtx.createBuffer(1, bufSize, audioCtx.sampleRate);
   const d = buf.getChannelData(0);
   for (let i = 0; i < bufSize; i++) d[i] = Math.random() * 2 - 1;
   const noiseSrc = audioCtx.createBufferSource();
   noiseSrc.buffer = buf; noiseSrc.loop = true;
-
   const lp = audioCtx.createBiquadFilter();
-  lp.type = 'lowpass'; lp.frequency.value = 400; lp.Q.value = 0.8;
-
+  lp.type = 'lowpass'; lp.frequency.value = 400;
   noiseGain = audioCtx.createGain();
   noiseGain.gain.value = 0;
   noiseSrc.connect(lp); lp.connect(noiseGain); noiseGain.connect(masterGain);
   noiseSrc.start();
-
   audioReady = true;
 }
 
-
-
 function updateAudioMotion(motion) {
   if (!audioCtx || !noiseGain) return;
-  noiseGain.gain.setTargetAtTime(
-    0.016 + motion * 0.055,
-    audioCtx.currentTime, 0.4
-  );
+  noiseGain.gain.setTargetAtTime(0.016 + motion * 0.055, audioCtx.currentTime, 0.4);
 }
 
-// ─── MATRIX ENGINE ───────────────────────────────────────────────────────────
-const canvas = document.getElementById('matrix-canvas');
-const ctx = canvas.getContext('2d');
-const video = document.getElementById('video');
-const sampleCanvas = document.getElementById('sample-canvas');
-const sampleCtx = sampleCanvas.getContext('2d');
+// ─── WEBSOCKET — TouchDesigner ────────────────────────────────────────────────
+// Cambia esta IP por la de tu laptop: abre cmd → ipconfig → IPv4
+const TD_IP   = '192.168.1.100'; // ← CAMBIA ESTO
+const TD_PORT = 9090;
+let ws = null;
+
+function connectWS() {
+  try {
+    ws = new WebSocket(`ws://${TD_IP}:${TD_PORT}`);
+    ws.onopen    = () => console.log('[WS] TouchDesigner conectado');
+    ws.onmessage = (e) => {
+      try {
+        const msg = JSON.parse(e.data);
+        if (msg.tipo === 'glitch') triggerMode(msg.nivel || 'leve');
+      } catch(_) {}
+    };
+    ws.onclose = () => setTimeout(connectWS, 3000);
+    ws.onerror = () => ws.close();
+  } catch(_) {}
+}
+
+// ─── MODOS VISUALES ───────────────────────────────────────────────────────────
+// leve  → glitch en el matrix
+// medio → waveform del golpe
+// fuerte→ silueta en hex deformada
+// max   → data stream binario + noise Ikeda
+
+let currentMode = 'matrix';
+let modeUntil   = 0;
+let glitchLevel = 0;
+let glitchUntil = 0;
+let glitchShift = [];
+let flashActive = false;
+
+// Waveform
+let waveformSamples = [];
+
+// Hex silueta
+let hexFrame = null;
+
+// Data stream / Ikeda
+let ikedaParticles = [];
+let ikedaColumns   = [];
+
+function triggerMode(nivel) {
+  const now = Date.now();
+  currentMode = nivel;
+  modeUntil   = now + (nivel === 'leve' ? 800 : nivel === 'medio' ? 2500 : nivel === 'fuerte' ? 3500 : 5000);
+
+  if (nivel === 'leve') {
+    glitchLevel = 1; glitchUntil = now + 800;
+    glitchShift = Array.from({length: rows}, () => Math.random() < 0.2 ? (Math.random()-0.5)*20 : 0);
+  } else if (nivel === 'medio') {
+    glitchLevel = 2; glitchUntil = now + 2500;
+    glitchShift = Array.from({length: rows}, () => Math.random() < 0.35 ? (Math.random()-0.5)*45 : 0);
+    buildWaveform();
+    fxCanvas.style.display = 'block';
+  } else if (nivel === 'fuerte') {
+    glitchLevel = 3; glitchUntil = now + 3500;
+    glitchShift = Array.from({length: rows}, () => Math.random() < 0.6 ? (Math.random()-0.5)*80 : 0);
+    captureHexFrame();
+    fxCanvas.style.display = 'block';
+  } else if (nivel === 'max') {
+    glitchLevel = 3; glitchUntil = now + 5000;
+    flashActive = true;
+    setTimeout(() => { flashActive = false; }, 120);
+    buildIkeda();
+    fxCanvas.style.display = 'block';
+  }
+}
+
+// ─── WAVEFORM ─────────────────────────────────────────────────────────────────
+function buildWaveform() {
+  waveformSamples = [];
+  const count = 300;
+  // Simula una señal de impacto con decay exponencial + ruido
+  for (let i = 0; i < count; i++) {
+    const t = i / count;
+    const decay = Math.exp(-t * 8);
+    const noise = (Math.random() * 2 - 1) * decay;
+    const sine  = Math.sin(t * Math.PI * 24) * decay * 0.6;
+    waveformSamples.push((noise + sine) * 0.9);
+  }
+}
+
+function drawWaveform(fxCtx, now) {
+  fxCtx.clearRect(0, 0, W, H);
+  fxCtx.fillStyle = '#000';
+  fxCtx.fillRect(0, 0, W, H);
+
+  const progress = 1 - (modeUntil - now) / 2500;
+  const visible  = Math.floor(waveformSamples.length * Math.min(progress * 3, 1));
+
+  // Línea central
+  fxCtx.strokeStyle = 'rgba(255,255,255,0.08)';
+  fxCtx.lineWidth = 1;
+  fxCtx.beginPath();
+  fxCtx.moveTo(0, H / 2);
+  fxCtx.lineTo(W, H / 2);
+  fxCtx.stroke();
+
+  // Waveform principal
+  fxCtx.strokeStyle = '#fff';
+  fxCtx.lineWidth = 1.5;
+  fxCtx.shadowBlur = 8;
+  fxCtx.shadowColor = '#fff';
+  fxCtx.beginPath();
+  for (let i = 0; i < visible; i++) {
+    const x = (i / waveformSamples.length) * W;
+    const y = H / 2 + waveformSamples[i] * H * 0.38;
+    i === 0 ? fxCtx.moveTo(x, y) : fxCtx.lineTo(x, y);
+  }
+  fxCtx.stroke();
+  fxCtx.shadowBlur = 0;
+
+  // Coordenadas estilo Ikeda
+  fxCtx.fillStyle = 'rgba(255,255,255,0.5)';
+  fxCtx.font = '10px Courier New';
+  fxCtx.fillText(`AMPLITUDE  ${(Math.abs(waveformSamples[Math.floor(visible*0.3)] || 0)).toFixed(6)}`, 16, H - 40);
+  fxCtx.fillText(`SAMPLES    ${visible.toString().padStart(6,'0')} / ${waveformSamples.length}`, 16, H - 26);
+  fxCtx.fillText(`FREQ       ${(44100).toString()}hz`, 16, H - 12);
+}
+
+// ─── HEX SILUETA ──────────────────────────────────────────────────────────────
+function captureHexFrame() {
+  if (!cameraActive || video.readyState < 2) {
+    hexFrame = null; return;
+  }
+  const tmp = document.createElement('canvas');
+  tmp.width = 48; tmp.height = 72;
+  tmp.getContext('2d').drawImage(video, 0, 0, 48, 72);
+  hexFrame = tmp.getContext('2d').getImageData(0, 0, 48, 72);
+}
+
+function drawHexSilueta(fxCtx, now) {
+  fxCtx.clearRect(0, 0, W, H);
+  fxCtx.fillStyle = '#000';
+  fxCtx.fillRect(0, 0, W, H);
+
+  const progress = 1 - (modeUntil - now) / 3500;
+  const deform   = Math.sin(progress * Math.PI) * 18;
+  const fontSize = 9;
+  fxCtx.font = `${fontSize}px Courier New`;
+
+  if (!hexFrame) {
+    // Sin cámara: grilla de hex aleatoria
+    for (let row = 0; row < Math.floor(H / fontSize); row++) {
+      for (let col = 0; col < Math.floor(W / 28); col++) {
+        const val = Math.floor(Math.random() * 256).toString(16).padStart(2,'0').toUpperCase();
+        const bright = Math.random();
+        fxCtx.fillStyle = bright > 0.85
+          ? `rgba(255,0,0,${0.5 + bright * 0.5})`
+          : `rgba(255,255,255,${0.05 + bright * 0.25})`;
+        const dy = Math.sin((col + row + progress * 10) * 0.8) * deform;
+        fxCtx.fillText(val, col * 28, row * fontSize + dy);
+      }
+    }
+    return;
+  }
+
+  const fw = hexFrame.width;
+  const fh = hexFrame.height;
+
+  for (let py = 0; py < fh; py++) {
+    for (let px = 0; px < fw; px++) {
+      const idx   = (py * fw + (fw - 1 - px)) * 4; // mirror
+      const r     = hexFrame.data[idx];
+      const g     = hexFrame.data[idx+1];
+      const b     = hexFrame.data[idx+2];
+      const luma  = (r * 0.299 + g * 0.587 + b * 0.114) / 255;
+      const hex   = ((r << 16) | (g << 8) | b).toString(16).padStart(6,'0').toUpperCase();
+
+      const sx = (px / fw) * W;
+      const sy = (py / fh) * H;
+      const dy = Math.sin((px + py * 0.5 + progress * 15) * 0.4) * deform;
+
+      if (luma > 0.15) {
+        fxCtx.fillStyle = luma > 0.6
+          ? `rgba(255,${Math.floor(luma*80)},${Math.floor(luma*40)},${0.4 + luma * 0.6})`
+          : `rgba(255,255,255,${0.08 + luma * 0.4})`;
+        fxCtx.fillText(hex, sx, sy + dy);
+      }
+    }
+  }
+
+  // Timestamp corriendo
+  fxCtx.fillStyle = 'rgba(255,0,0,0.7)';
+  fxCtx.font = '10px Courier New';
+  fxCtx.fillText(`0x${Date.now().toString(16).toUpperCase()}`, 16, H - 14);
+}
+
+// ─── IKEDA — DATA STREAM + NOISE ─────────────────────────────────────────────
+function buildIkeda() {
+  // Columnas de datos binarios cayendo
+  ikedaColumns = [];
+  const colCount = Math.floor(W / 11);
+  for (let i = 0; i < colCount; i++) {
+    ikedaColumns.push({
+      x: i * 11,
+      y: Math.random() * -H,
+      speed: 4 + Math.random() * 12,
+      chars: Array.from({length: 40}, () => Math.random() > 0.5 ? '1' : '0'),
+      bright: Math.random() > 0.7,
+    });
+  }
+  // Partículas de ruido
+  ikedaParticles = Array.from({length: 600}, () => ({
+    x: Math.random() * W,
+    y: Math.random() * H,
+    size: Math.random() > 0.92 ? 3 : 1,
+    alpha: 0.2 + Math.random() * 0.8,
+    vx: (Math.random() - 0.5) * 0.5,
+    vy: (Math.random() - 0.5) * 0.5,
+  }));
+}
+
+function drawIkeda(fxCtx, now) {
+  const progress = 1 - (modeUntil - now) / 5000;
+
+  // Fondo con trail
+  fxCtx.fillStyle = 'rgba(0,0,0,0.25)';
+  fxCtx.fillRect(0, 0, W, H);
+
+  fxCtx.font = '10px Courier New';
+
+  // Columnas binarias
+  for (let col of ikedaColumns) {
+    col.y += col.speed;
+    if (col.y > H + 400) col.y = -Math.random() * H;
+
+    for (let i = 0; i < col.chars.length; i++) {
+      const cy = col.y + i * 10;
+      if (cy < 0 || cy > H) continue;
+      col.chars[i] = Math.random() > 0.96 ? (Math.random() > 0.5 ? '1' : '0') : col.chars[i];
+      const head = i === 0;
+      fxCtx.fillStyle = head
+        ? '#fff'
+        : col.bright
+          ? `rgba(255,255,255,${0.15 + (1 - i/col.chars.length) * 0.5})`
+          : `rgba(255,255,255,${0.04 + (1 - i/col.chars.length) * 0.15})`;
+      fxCtx.fillText(col.chars[i], col.x, cy);
+    }
+  }
+
+  // Partículas de ruido
+  fxCtx.shadowBlur = 0;
+  for (let p of ikedaParticles) {
+    p.x += p.vx; p.y += p.vy;
+    if (p.x < 0) p.x = W; if (p.x > W) p.x = 0;
+    if (p.y < 0) p.y = H; if (p.y > H) p.y = 0;
+    const flicker = Math.random() > 0.85 ? 0 : p.alpha;
+    fxCtx.fillStyle = `rgba(255,255,255,${flicker})`;
+    fxCtx.fillRect(p.x, p.y, p.size, p.size);
+  }
+
+  // Líneas horizontales de scan ocasionales
+  if (Math.random() < 0.06) {
+    const ly = Math.floor(Math.random() * H);
+    fxCtx.fillStyle = `rgba(255,255,255,${0.1 + Math.random() * 0.3})`;
+    fxCtx.fillRect(0, ly, W, 1);
+  }
+
+  // Datos en esquinas estilo Ikeda
+  fxCtx.fillStyle = 'rgba(255,255,255,0.6)';
+  fxCtx.font = '9px Courier New';
+  const ts = Date.now();
+  fxCtx.fillText(`${ts.toString(2).slice(-24)}`, 10, 14);
+  fxCtx.fillText(`0x${ts.toString(16).toUpperCase().padStart(12,'0')}`, 10, 26);
+  fxCtx.fillText(`ERR 0N1+ :: SIGNAL CORRUPT :: ${(progress*100).toFixed(1)}%`, 10, H - 12);
+}
+
+// ─── MATRIX ENGINE ────────────────────────────────────────────────────────────
+const canvas      = document.getElementById('matrix-canvas');
+const ctx         = canvas.getContext('2d');
+const fxCanvas    = document.getElementById('fx-canvas');
+const fxCtx       = fxCanvas.getContext('2d');
+const video       = document.getElementById('video');
+const sampleCanvas= document.getElementById('sample-canvas');
+const sampleCtx   = sampleCanvas.getContext('2d');
 
 let W, H, cols, rows, fontSize, cw;
-let cells = [];
-let activePhrases = [];
-let motionLevel = 0;
-let prevFrame = null;
-let cameraActive = false;
-let pixelData = null;
+let cells = [], activePhrases = [];
+let motionLevel = 0, prevFrame = null;
+let cameraActive = false, pixelData = null;
 let sampleW = 120, sampleH = 90;
 
-const CHARS = '01アイウエオカキクケコABCDEFGHIJKLMNOPQRSTUVWXYZ?!@#$%&[]{}01110100';
+const CHARS        = '01アイウエオカキクケコABCDEFGHIJKLMNOPQRSTUVWXYZ?!@#$%&[]{}01110100';
 const BRIGHT_CHARS = '@#%&WMB80';
+const GLITCH_CHARS = '▓▒░█▄▀■□▪▫◆◇';
 
 const ALL_PHRASES = [
-  // Los Crudos — Levántate
   '¿Qué harías tú en una revolución?',
   '¿Qué estás preparando para hacer en una dictadura?',
   '¿Qué vas a hacer cuando torturen a tu hermano?',
@@ -144,27 +391,26 @@ const ALL_PHRASES = [
 ];
 
 function resize() {
-  W = canvas.width = window.innerWidth;
-  H = canvas.height = window.innerHeight;
+  W = canvas.width  = fxCanvas.width  = window.innerWidth;
+  H = canvas.height = fxCanvas.height = window.innerHeight;
   fontSize = Math.max(13, Math.min(17, W / 38));
-  cw = fontSize * 0.62;
+  cw   = fontSize * 0.62;
   cols = Math.floor(W / cw);
   rows = Math.floor(H / fontSize) + 1;
-  sampleCanvas.width = sampleW;
-  sampleCanvas.height = sampleH;
+  sampleCanvas.width = sampleW; sampleCanvas.height = sampleH;
   buildGrid();
 }
 
-function randChar() { return CHARS[Math.floor(Math.random() * CHARS.length)]; }
+function randChar()   { return CHARS[Math.floor(Math.random() * CHARS.length)]; }
 function randBright() { return BRIGHT_CHARS[Math.floor(Math.random() * BRIGHT_CHARS.length)]; }
+function randGlitch() { return GLITCH_CHARS[Math.floor(Math.random() * GLITCH_CHARS.length)]; }
 
 function buildGrid() {
   cells = [];
   for (let r = 0; r < rows; r++) {
     cells[r] = [];
-    for (let c = 0; c < cols; c++) {
+    for (let c = 0; c < cols; c++)
       cells[r][c] = { ch: randChar(), timer: Math.random() * 20 };
-    }
   }
   activePhrases = [];
 }
@@ -179,9 +425,9 @@ function getPixelBrightness(r, c) {
   if (!pixelData) return 0;
   const px = Math.floor((c / cols) * sampleW);
   const py = Math.floor((r / rows) * sampleH);
-  const mirroredPx = sampleW - 1 - px;
-  const idx = (py * sampleW + mirroredPx) * 4;
-  let luma = pixelData[idx] * 0.299 + pixelData[idx+1] * 0.587 + pixelData[idx+2] * 0.114;
+  const mx = sampleW - 1 - px;
+  const idx = (py * sampleW + mx) * 4;
+  let luma = pixelData[idx]*0.299 + pixelData[idx+1]*0.587 + pixelData[idx+2]*0.114;
   luma = (luma - 128) * 1.8 + 128;
   return Math.max(0, Math.min(255, luma)) / 255;
 }
@@ -198,15 +444,15 @@ function detectMotion(frame) {
 
 function spawnPhrase() {
   const phrase = ALL_PHRASES[Math.floor(Math.random() * ALL_PHRASES.length)];
-  const chars = phrase.split('');
-  const randomRow = Math.floor(Math.random() * rows);
-  const randomCol = Math.floor(Math.random() * Math.max(1, cols - chars.length - 1));
+  const chars  = phrase.split('');
+  const rr     = Math.floor(Math.random() * rows);
+  const rc     = Math.floor(Math.random() * Math.max(1, cols - chars.length - 1));
   activePhrases.push({
-    chars, r: randomRow, c: randomCol,
+    chars, r: rr, c: rc,
     born: Date.now(),
     life: 4500 + Math.random() * 2500,
     drift: (Math.random() - 0.5) * 0.06,
-    fr: randomRow + (Math.random() - 0.5) * 18,
+    fr: rr + (Math.random() - 0.5) * 18,
   });
 }
 
@@ -216,7 +462,7 @@ function updatePhrases(motion) {
   if (motion > 0.002 && activePhrases.length < 14 && Math.random() < 0.42) spawnPhrase();
   activePhrases.forEach(p => {
     p.r += (p.fr - p.r) * 0.012 + p.drift * motion * 10;
-    p.r = Math.max(0, Math.min(rows - 1, p.r));
+    p.r  = Math.max(0, Math.min(rows - 1, p.r));
   });
 }
 
@@ -231,60 +477,106 @@ function getRedChar(r, c) {
   return null;
 }
 
-function draw() {
-  ctx.fillStyle = 'rgba(0,0,0,0.08)';
+function drawMatrix() {
+  const now      = Date.now();
+  const isGlitch = now < glitchUntil;
+  const level    = isGlitch ? glitchLevel : 0;
+
+  if (flashActive) {
+    ctx.fillStyle = 'rgba(255,255,255,0.2)';
+    ctx.fillRect(0, 0, W, H);
+    return;
+  }
+
+  ctx.fillStyle = level > 0 ? 'rgba(0,0,0,0.04)' : 'rgba(0,0,0,0.08)';
   ctx.fillRect(0, 0, W, H);
   ctx.font = `${fontSize}px "Courier New", monospace`;
 
   for (let r = 0; r < rows; r++) {
+    const shift      = (level >= 2 && glitchShift[r]) ? glitchShift[r] : 0;
+    const rowCorrupt = level === 3 && Math.random() < 0.07;
+
     for (let c = 0; c < cols; c++) {
-      const cell = cells[r][c];
-      cell.timer -= 1;
+      const cell   = cells[r][c];
+      cell.timer  -= level > 0 ? (1 + level) : 1;
       const bright = getPixelBrightness(r, c);
       const isBody = bright > 0.32;
 
       if (cell.timer <= 0) {
-        cell.ch = isBody ? randBright() : randChar();
-        cell.timer = isBody ? (4 + Math.random() * 10) : (10 + Math.random() * 34);
+        if (rowCorrupt || (level >= 2 && Math.random() < 0.12)) {
+          cell.ch    = randGlitch();
+          cell.timer = 2 + Math.random() * 5;
+        } else {
+          cell.ch    = isBody ? randBright() : randChar();
+          cell.timer = isBody ? (4 + Math.random() * 10) : (10 + Math.random() * 34);
+        }
       }
 
-      const red = getRedChar(r, c);
+      const xPos = c * cw + shift;
+      const yPos = r * fontSize;
+      const red  = getRedChar(r, c);
+
       if (red !== null) {
-        ctx.fillStyle = '#ff2a2a';
-        ctx.shadowBlur = 5;
-        ctx.shadowColor = '#ff0000';
-        ctx.fillText(red, c * cw, r * fontSize);
+        ctx.fillStyle  = (level === 3 && Math.random() < 0.15) ? '#fff' : '#ff2a2a';
+        ctx.shadowBlur = level > 0 ? 10 : 5;
+        ctx.shadowColor= '#ff0000';
+        ctx.fillText(red, xPos, yPos);
         ctx.shadowBlur = 0;
+      } else if (rowCorrupt) {
+        ctx.fillStyle = `rgba(255,${Math.floor(Math.random()*40)},${Math.floor(Math.random()*40)},0.75)`;
+        ctx.fillText(cell.ch, xPos, yPos);
       } else if (isBody) {
-        const alpha = 0.18 + bright * 0.35;
-        ctx.fillStyle = `rgba(255,255,255,${alpha})`;
-        ctx.shadowBlur = 2;
-        ctx.shadowColor = 'rgba(255,255,255,0.5)';
-        ctx.fillText(cell.ch, c * cw, r * fontSize);
+        const alpha = 0.18 + bright * 0.35 + (level > 0 ? Math.random() * 0.2 : 0);
+        ctx.fillStyle  = `rgba(255,255,255,${alpha})`;
+        ctx.shadowBlur = level > 0 ? 4 : 2;
+        ctx.shadowColor= 'rgba(255,255,255,0.5)';
+        ctx.fillText(cell.ch, xPos, yPos);
         ctx.shadowBlur = 0;
       } else {
-        ctx.fillStyle = `rgba(255,255,255,${0.03 + Math.random() * 0.08})`;
-        ctx.fillText(cell.ch, c * cw, r * fontSize);
+        const a = 0.03 + Math.random() * (0.08 + level * 0.05);
+        ctx.fillStyle = `rgba(255,255,255,${a})`;
+        ctx.fillText(cell.ch, xPos, yPos);
       }
+    }
+
+    // Línea de error horizontal
+    if (level === 3 && Math.random() < 0.015) {
+      ctx.fillStyle = `rgba(255,0,0,${0.3 + Math.random() * 0.4})`;
+      ctx.fillRect(0, r * fontSize, W, 1);
     }
   }
 }
 
+// ─── LOOP PRINCIPAL ───────────────────────────────────────────────────────────
 function loop() {
-  pixelData = sampleVideo();
-  const raw = detectMotion(pixelData);
+  const now = Date.now();
+  pixelData  = sampleVideo();
+  const raw  = detectMotion(pixelData);
   motionLevel += (raw - motionLevel) * 0.18;
   updateAudioMotion(motionLevel);
   updatePhrases(motionLevel);
-  draw();
+  drawMatrix();
+
+  // Capa fx encima del matrix
+  if (now < modeUntil) {
+    if (currentMode === 'medio')  drawWaveform(fxCtx, now);
+    if (currentMode === 'fuerte') drawHexSilueta(fxCtx, now);
+    if (currentMode === 'max')    drawIkeda(fxCtx, now);
+  } else if (fxCanvas.style.display !== 'none') {
+    fxCtx.clearRect(0, 0, W, H);
+    fxCanvas.style.display = 'none';
+    currentMode = 'matrix';
+    glitchLevel = 0;
+  }
+
   requestAnimationFrame(loop);
 }
 
+// ─── INIT ─────────────────────────────────────────────────────────────────────
 async function iniciar() {
   document.getElementById('start').style.display = 'none';
-
-  // Init audio — must happen on user gesture
-  try { initAudio(); } catch(e) {}
+  try { initAudio(); } catch(_) {}
+  connectWS();
 
   try {
     const stream = await navigator.mediaDevices.getUserMedia({
@@ -294,7 +586,7 @@ async function iniciar() {
     video.srcObject = stream;
     await video.play();
     cameraActive = true;
-  } catch(e) {
+  } catch(_) {
     cameraActive = false;
     setInterval(() => { motionLevel = 0.05 + Math.random() * 0.3; }, 2500);
   }
