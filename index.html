@@ -23,6 +23,8 @@ html,body{width:100%;height:100%;background:#000;overflow:hidden;touch-action:no
 #start-sub{position:relative;z-index:1;font-size:13px;color:#fff;letter-spacing:0.4em;text-align:center;opacity:0.7}
 #start-btn{position:relative;z-index:1;font-family:'Courier New',monospace;font-size:14px;color:#000;background:#e00;padding:12px 32px;letter-spacing:0.3em;border:none;cursor:pointer}
 #artist-tag{position:relative;z-index:1;font-family:'Courier New',monospace;font-size:11px;color:#e00;letter-spacing:0.3em}
+#start-haiku.glitch-jolt{transform:translateX(var(--jx,0)) translateY(var(--jy,0));opacity:var(--jo,1);filter:var(--jf,none)}
+#start-btn.glitch-jolt{transform:translateX(var(--jx,0));opacity:var(--jo,1);filter:var(--jf,none)}
 </style>
 </head>
 <body>
@@ -163,6 +165,38 @@ function drawGlitchBG() {
     const [r,g,b] = pal16[Math.floor(Math.random() * pal16.length)];
     gctx.fillStyle = `rgba(${r},${g},${b},0.1)`;
     gctx.fillRect(0, 0, gW, gH);
+  }
+
+  // ── Glitch en texto y botón — jolt ocasional ─────────────────────────────
+  const haiku = document.getElementById('start-haiku');
+  const btn   = document.getElementById('start-btn');
+  if (Math.random() < 0.06) {
+    // Jolt horizontal — desplazamiento brusco
+    const jx = (Math.random()-0.5) * 18;
+    const jy = (Math.random()-0.5) * 6;
+    const jo = 0.4 + Math.random() * 0.5;
+    const jf = Math.random() < 0.4
+      ? `blur(${1+Math.random()*3}px)`
+      : `hue-rotate(${Math.floor(Math.random()*360)}deg)`;
+    haiku.style.setProperty('--jx', jx+'px');
+    haiku.style.setProperty('--jy', jy+'px');
+    haiku.style.setProperty('--jo', jo);
+    haiku.style.setProperty('--jf', jf);
+    haiku.classList.add('glitch-jolt');
+    if (Math.random() < 0.5) {
+      btn.style.setProperty('--jx', (-jx*0.5)+'px');
+      btn.style.setProperty('--jo', jo + 0.2);
+      btn.style.setProperty('--jf', 'none');
+      btn.classList.add('glitch-jolt');
+    }
+    setTimeout(() => {
+      haiku.classList.remove('glitch-jolt');
+      btn.classList.remove('glitch-jolt');
+      haiku.style.removeProperty('--jx');
+      haiku.style.removeProperty('--jy');
+      haiku.style.removeProperty('--jo');
+      haiku.style.removeProperty('--jf');
+    }, 40 + Math.floor(Math.random() * 80));
   }
 
   requestAnimationFrame(drawGlitchBG);
@@ -431,12 +465,40 @@ function drawPointCloud(fxCtx, now) {
     fxCtx.fillRect(0, y, W, 1);
   }
 
-  // ── Glitch strip horizontal ocasional ─────────────────────────────────────
-  if (Math.random() < 0.08) {
+  // ── Glitch agresivo tipo pantalla de inicio ──────────────────────────────
+  // Bloques de color desplazados
+  const pal16b = [[220,0,0],[0,160,255],[255,200,0],[180,0,255],[0,255,100],[255,255,255]];
+  const nGlBlocks = 2 + Math.floor(Math.random() * 5);
+  for (let gi = 0; gi < nGlBlocks; gi++) {
+    if (Math.random() > 0.5) continue;
+    const [gr,gg,gb] = pal16b[Math.floor(Math.random() * pal16b.length)];
+    const gbw = Math.floor(W * (0.05 + Math.random() * 0.4));
+    const gbh = Math.floor(1 + Math.random() * 8);
+    const gbx = Math.floor(Math.random() * (W - gbw));
+    const gby = Math.floor(Math.random() * H);
+    fxCtx.fillStyle = `rgba(${gr},${gg},${gb},${0.4 + Math.random()*0.55})`;
+    fxCtx.fillRect(gbx, gby, gbw, gbh);
+  }
+  // Strips de desplazamiento múltiples
+  const nStripsPC = 3 + Math.floor(Math.random() * 8);
+  for (let si = 0; si < nStripsPC; si++) {
+    if (Math.random() > 0.55) continue;
     const gy  = Math.floor(Math.random() * H);
-    const gh  = 1 + Math.floor(Math.random() * 4);
-    const gdx = (Math.random()-0.5) * W * 0.12;
+    const gh  = 1 + Math.floor(Math.random() * 10);
+    const gdx = (Math.random()-0.5) * W * 0.28;
     fxCtx.drawImage(fxCtx.canvas, 0, gy, W, gh, gdx, gy, W, gh);
+  }
+  // Jolt del canvas completo ocasional
+  if (Math.random() < 0.06) {
+    const jx = (Math.random()-0.5) * W * 0.04;
+    const jy = (Math.random()-0.5) * H * 0.02;
+    fxCtx.drawImage(fxCtx.canvas, jx, jy, W, H);
+  }
+  // Flash de color
+  if (Math.random() < 0.04) {
+    const [fr,fg,fb] = pal16b[Math.floor(Math.random() * pal16b.length)];
+    fxCtx.fillStyle = `rgba(${fr},${fg},${fb},0.08)`;
+    fxCtx.fillRect(0, 0, W, H);
   }
 
   // HUD
@@ -445,70 +507,135 @@ function drawPointCloud(fxCtx, now) {
   fxCtx.fillText(`PROC ${_winsData.wins.length} :: 0x${now.toString(16).slice(-8).toUpperCase()}`, 10, H-12);
 }
 
-// ─── MODO MEDIO: THERMAL / DATAMOSH colorido — NO TOCAR ──────────────────────
+// ─── MODO MEDIO: FIRE GLITCH — partículas de fuego rojo + cámara ─────────────
+// Inspirado en el gif: explosión radial de partículas rojas desde el centro,
+// mezclada con la silueta de la cámara en negro/rojo
 let dmAccum = null;
+let _fireParticles = [];
+
+function _initFire() {
+  _fireParticles = [];
+  // Spawn inicial de partículas
+  for (let i = 0; i < 180; i++) _spawnFireParticle(true);
+}
+
+function _spawnFireParticle(init) {
+  const angle  = Math.random() * Math.PI * 2;
+  const speed  = init
+    ? Math.random() * Math.max(W, H) * 0.5   // distribuidas por toda la pantalla
+    : 1 + Math.random() * 4;                   // velocidad inicial normal
+  const dist   = init ? Math.random() * Math.max(W, H) * 0.5 : 0;
+  _fireParticles.push({
+    x:  W/2 + Math.cos(angle) * dist,
+    y:  H/2 + Math.sin(angle) * dist,
+    vx: Math.cos(angle) * speed,
+    vy: Math.sin(angle) * speed,
+    life:  0.5 + Math.random() * 0.5,
+    decay: 0.008 + Math.random() * 0.018,
+    size:  1 + Math.random() * 4,
+    // Color: rojo dominante, toque de verde/amarillo en los más brillantes
+    r: 180 + Math.floor(Math.random() * 75),
+    g: Math.random() < 0.15 ? 80 + Math.floor(Math.random()*80) : Math.floor(Math.random()*25),
+    b: 0,
+  });
+}
 
 function drawThermal(fxCtx, now) {
-  if (!cameraActive || video.readyState < 2) {
-    fxCtx.clearRect(0, 0, W, H); return;
-  }
+  const t = now * 0.001;
+
+  // ── Fondo: acumular frame de cámara en rojo/negro ─────────────────────────
   if (!dmAccum || dmAccum.width !== W) {
     dmAccum = document.createElement('canvas');
     dmAccum.width = W; dmAccum.height = H;
+    _initFire();
   }
+
+  // Persistencia oscura — corazón del efecto de fuego
   const ac = dmAccum.getContext('2d');
-  const tmp = document.createElement('canvas');
-  tmp.width = W; tmp.height = H;
-  const tc = tmp.getContext('2d');
-  tc.save(); tc.scale(-1,1); tc.drawImage(video,-W,0,W,H); tc.restore();
+  ac.fillStyle = 'rgba(0,0,0,0.18)';
+  ac.fillRect(0, 0, W, H);
 
-  ac.globalAlpha = 0.8;
-  ac.drawImage(tmp, 0, 0);
-  ac.globalAlpha = 1;
-
-  const nB = 5 + Math.floor(Math.random()*7);
-  for (let i = 0; i < nB; i++) {
-    const bx = Math.floor(Math.random()*W);
-    const by = Math.floor(Math.random()*H);
-    const bw = 25 + Math.floor(Math.random()*W*0.4);
-    const bh = 2  + Math.floor(Math.random()*28);
-    ac.drawImage(dmAccum, bx, by, bw, bh,
-      bx+(Math.random()-0.5)*W*0.3, by+(Math.random()-0.5)*8, bw, bh);
+  if (cameraActive && video.readyState >= 2) {
+    // Capturar cámara y mapear a rojo/negro
+    const capW = Math.min(W, 320), capH = Math.min(H, 240);
+    const camTmp = document.createElement('canvas');
+    camTmp.width = capW; camTmp.height = capH;
+    const camCtx = camTmp.getContext('2d');
+    camCtx.save(); camCtx.scale(-1,1); camCtx.drawImage(video,-capW,0,capW,capH); camCtx.restore();
+    const frame = camCtx.getImageData(0, 0, capW, capH);
+    const data  = frame.data;
+    // Mapear: zonas brillantes → rojo intenso, oscuras → negro
+    for (let i = 0; i < data.length; i+=4) {
+      const luma = data[i]*0.299 + data[i+1]*0.587 + data[i+2]*0.114;
+      const v    = Math.pow(luma/255, 0.8) * 255;
+      data[i]   = Math.min(255, v * 1.6);  // rojo fuerte
+      data[i+1] = Math.min(255, v * 0.12); // verde casi nulo
+      data[i+2] = 0;
+      data[i+3] = Math.min(255, v * 1.4);  // alpha proporcional al brillo
+    }
+    camCtx.putImageData(frame, 0, 0);
+    // Mezclar silueta en el acumulador
+    ac.globalCompositeOperation = 'screen';
+    ac.globalAlpha = 0.45;
+    ac.drawImage(camTmp, 0, 0, W, H);
+    ac.globalAlpha = 1;
+    ac.globalCompositeOperation = 'source-over';
   }
 
+  // ── Actualizar y dibujar partículas de fuego ──────────────────────────────
+  if (_fireParticles.length === 0) _initFire();
+  const toRemove = [];
+  for (let i = 0; i < _fireParticles.length; i++) {
+    const p = _fireParticles[i];
+    p.x    += p.vx;
+    p.y    += p.vy;
+    p.vx   *= 0.97; // fricción leve
+    p.vy   *= 0.97;
+    p.life -= p.decay;
+    if (p.life <= 0 || p.x < -20 || p.x > W+20 || p.y < -20 || p.y > H+20) {
+      toRemove.push(i);
+    } else {
+      // Dibujar en acumulador con screen blending — se acumula el calor
+      ac.globalCompositeOperation = 'screen';
+      ac.globalAlpha = p.life * 0.9;
+      ac.fillStyle   = `rgb(${p.r},${p.g},${p.b})`;
+      ac.beginPath();
+      ac.arc(p.x, p.y, p.size * p.life, 0, Math.PI*2);
+      ac.fill();
+      ac.globalAlpha = 1;
+      ac.globalCompositeOperation = 'source-over';
+    }
+  }
+  // Eliminar muertas y reponer
+  for (let i = toRemove.length-1; i >= 0; i--) _fireParticles.splice(toRemove[i],1);
+  const toSpawn = Math.min(12, 180 - _fireParticles.length);
+  for (let i = 0; i < toSpawn; i++) _spawnFireParticle(false);
+
+  // ── Render del acumulador al fxCanvas ────────────────────────────────────
   fxCtx.clearRect(0, 0, W, H);
   fxCtx.drawImage(dmAccum, 0, 0);
 
+  // Zoom radial leve — como si la explosión se expandiera
   fxCtx.globalCompositeOperation = 'screen';
-  fxCtx.globalAlpha = 0.2;
-  fxCtx.drawImage(dmAccum, -12, 5);
-  fxCtx.globalAlpha = 0.18;
-  fxCtx.drawImage(dmAccum, 10, -6);
+  fxCtx.globalAlpha = 0.12;
+  fxCtx.drawImage(dmAccum, -W*0.02, -H*0.02, W*1.04, H*1.04);
   fxCtx.globalAlpha = 1;
   fxCtx.globalCompositeOperation = 'source-over';
 
-  fxCtx.globalCompositeOperation = 'overlay';
-  fxCtx.globalAlpha = 0.3;
-  fxCtx.fillStyle = `hsl(${(now*0.05)%360},100%,50%)`;
+  // ── Glitch horizontal — como en el gif ───────────────────────────────────
+  if (Math.random() < 0.3) {
+    const gy  = Math.floor(Math.random() * H);
+    const gh  = 1 + Math.floor(Math.random() * 8);
+    const gdx = (Math.random()-0.5) * W * 0.15;
+    fxCtx.drawImage(fxCtx.canvas, 0, gy, W, gh, gdx, gy, W, gh);
+  }
+
+  // Vignette oscura en bordes
+  const vig = fxCtx.createRadialGradient(W/2,H/2,H*0.25,W/2,H/2,H*0.85);
+  vig.addColorStop(0,'rgba(0,0,0,0)');
+  vig.addColorStop(1,'rgba(0,0,0,0.7)');
+  fxCtx.fillStyle = vig;
   fxCtx.fillRect(0,0,W,H);
-  fxCtx.globalAlpha = 1;
-  fxCtx.globalCompositeOperation = 'source-over';
-
-  for (let y = 0; y < H; y += 4) {
-    fxCtx.fillStyle = 'rgba(0,0,0,0.18)';
-    fxCtx.fillRect(0, y, W, 1);
-  }
-
-  if (Math.random() < 0.2) {
-    const gy = Math.floor(Math.random()*H);
-    const gh = 10 + Math.floor(Math.random()*40);
-    fxCtx.drawImage(fxCtx.canvas, 0, gy, W, gh,
-      (Math.random()-0.5)*W*0.4, gy, W, gh);
-  }
-  if (Math.random() < 0.04) {
-    fxCtx.fillStyle = `rgba(255,255,255,${0.08+Math.random()*0.18})`;
-    fxCtx.fillRect(0,0,W,H);
-  }
 }
 
 // ─── MODO FUERTE: DATAMOSH — súper corrupto, imagen destruida ─────────────────
