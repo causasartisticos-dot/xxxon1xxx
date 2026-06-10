@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>error de usuario 0N1+ —</title>
+<title>error de usuario 0N1+ — PURGATORIO N TEMPLE OS 2</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 html,body{width:100%;height:100%;background:#000;overflow:hidden;touch-action:none}
@@ -280,6 +280,7 @@ function triggerMode(nivel) {
     glitchShift = Array.from({length: rows}, () =>
       Math.random() < 0.35 ? (Math.random()-0.5)*45 : 0);
     dmAccum = null;
+    _thermalCounterStart = now;  // reiniciar contador al activar modo
   } else if (nivel === 'fuerte' || nivel === 'max') {
     currentMode = 'fuerte';
     modeUntil   = now + 5000;
@@ -513,6 +514,11 @@ function drawPointCloud(fxCtx, now) {
 let dmAccum = null;
 let _fireParticles = [];
 
+// ─── CONTADOR 5000ml ─────────────────────────────────────────────────────────
+let _thermalCounterStart = null;  // timestamp cuando arrancó el modo medio
+const COUNTER_TOTAL_MS = 12000;   // 12s para bajar de 5000 a 0
+const COUNTER_MAX = 5000;
+
 function _initFire() {
   _fireParticles = [];
   // Spawn inicial de partículas
@@ -540,102 +546,177 @@ function _spawnFireParticle(init) {
   });
 }
 
-function drawThermal(fxCtx, now) {
-  const t = now * 0.001;
+// ─── GLITCH STATE para modo medio ────────────────────────────────────────────
+let _ctrGlitch = { jx: 0, jy: 0, active: false, until: 0, slices: [] };
 
-  // ── Fondo: acumular frame de cámara en rojo/negro ─────────────────────────
+function _updateCtrGlitch(now) {
+  if (now > _ctrGlitch.until) {
+    // Nuevo jolt ocasional
+    if (Math.random() < 0.07) {
+      _ctrGlitch.active = true;
+      _ctrGlitch.until  = now + 40 + Math.random() * 250;
+      _ctrGlitch.jx     = (Math.random() - 0.5) * 32;
+      _ctrGlitch.jy     = (Math.random() - 0.5) * 14;
+      // Slices horizontales para fragmentar el texto
+      _ctrGlitch.slices = [];
+      const n = 2 + Math.floor(Math.random() * 5);
+      for (let i = 0; i < n; i++) {
+        _ctrGlitch.slices.push({
+          y:   Math.random(),          // fracción de altura del texto
+          h:   0.04 + Math.random() * 0.18,
+          dx:  (Math.random() - 0.5) * 60,
+          col: Math.random() < 0.4,   // ¿usar color aberración?
+        });
+      }
+    } else {
+      _ctrGlitch.active = false;
+      _ctrGlitch.jx = 0; _ctrGlitch.jy = 0;
+      _ctrGlitch.slices = [];
+    }
+  }
+}
+
+function drawThermal(fxCtx, now) {
+  // ── Inicializar contador ──────────────────────────────────────────────────
   if (!dmAccum || dmAccum.width !== W) {
     dmAccum = document.createElement('canvas');
     dmAccum.width = W; dmAccum.height = H;
-    _initFire();
+    _thermalCounterStart = now;
+    _ctrGlitch = { jx: 0, jy: 0, active: false, until: 0, slices: [] };
   }
 
-  // Persistencia oscura — corazón del efecto de fuego
-  const ac = dmAccum.getContext('2d');
-  ac.fillStyle = 'rgba(0,0,0,0.18)';
-  ac.fillRect(0, 0, W, H);
+  // ── Fondo completamente negro ─────────────────────────────────────────────
+  fxCtx.fillStyle = '#000';
+  fxCtx.fillRect(0, 0, W, H);
 
-  if (cameraActive && video.readyState >= 2) {
-    // Capturar cámara y mapear a rojo/negro
-    const capW = Math.min(W, 320), capH = Math.min(H, 240);
-    const camTmp = document.createElement('canvas');
-    camTmp.width = capW; camTmp.height = capH;
-    const camCtx = camTmp.getContext('2d');
-    camCtx.save(); camCtx.scale(-1,1); camCtx.drawImage(video,-capW,0,capW,capH); camCtx.restore();
-    const frame = camCtx.getImageData(0, 0, capW, capH);
-    const data  = frame.data;
-    // Mapear: zonas brillantes → rojo intenso, oscuras → negro
-    for (let i = 0; i < data.length; i+=4) {
-      const luma = data[i]*0.299 + data[i+1]*0.587 + data[i+2]*0.114;
-      const v    = Math.pow(luma/255, 0.8) * 255;
-      data[i]   = Math.min(255, v * 1.6);  // rojo fuerte
-      data[i+1] = Math.min(255, v * 0.12); // verde casi nulo
-      data[i+2] = 0;
-      data[i+3] = Math.min(255, v * 1.4);  // alpha proporcional al brillo
+  // ── Scanlines CRT sutiles ─────────────────────────────────────────────────
+  for (let y = 0; y < H; y += 3) {
+    fxCtx.fillStyle = 'rgba(0,0,0,0.35)';
+    fxCtx.fillRect(0, y, W, 1);
+  }
+
+  // ── Actualizar estado de glitch ───────────────────────────────────────────
+  _updateCtrGlitch(now);
+
+  // ── Calcular valor del contador ───────────────────────────────────────────
+  const elapsed  = now - (_thermalCounterStart || now);
+  const progress = Math.min(1, elapsed / COUNTER_TOTAL_MS);
+  const mlValue  = Math.max(0, Math.round(COUNTER_MAX * (1 - progress)));
+  const mlStr    = String(mlValue).padStart(4, '0') + '.';
+
+  // ── Tipografía: misma escala que el gif — grande, centrado ───────────────
+  const fontSize2 = Math.max(72, Math.min(200, W * 0.22));
+  const cx = W / 2;
+  const cy = H / 2;
+
+  // Dibujar en canvas auxiliar para poder hacer slicing de glitch
+  if (!dmAccum._textCanvas || dmAccum._textCanvas.width !== W) {
+    dmAccum._textCanvas = document.createElement('canvas');
+    dmAccum._textCanvas.width = W;
+    dmAccum._textCanvas.height = H;
+  }
+  const tc  = dmAccum._textCanvas;
+  const tctx = tc.getContext('2d');
+  tctx.clearRect(0, 0, W, H);
+
+  // Capas de glow — cian como el display de la referencia
+  tctx.font         = `bold ${fontSize2}px "Courier New", monospace`;
+  tctx.textAlign    = 'center';
+  tctx.textBaseline = 'middle';
+
+  // Glow exterior amplio
+  tctx.shadowColor = '#00ffee';
+  tctx.shadowBlur  = 55;
+  tctx.fillStyle   = 'rgba(0,255,238,0.12)';
+  tctx.fillText(mlStr, cx, cy);
+
+  // Glow medio
+  tctx.shadowBlur = 28;
+  tctx.fillStyle  = 'rgba(0,230,220,0.35)';
+  tctx.fillText(mlStr, cx, cy);
+
+  // Glow interior nítido
+  tctx.shadowBlur = 12;
+  tctx.fillStyle  = 'rgba(0,255,238,0.7)';
+  tctx.fillText(mlStr, cx, cy);
+
+  // Texto principal — cian brillante igual al display del gif
+  tctx.shadowBlur = 6;
+  tctx.fillStyle  = '#00ffe8';
+  tctx.fillText(mlStr, cx, cy);
+
+  // Punto decimal parpadeante extra (el gif lo tiene siempre encendido)
+  // ya está incluido en mlStr como '.'
+
+  // ── Componer texto sobre fxCtx con glitch ─────────────────────────────────
+  fxCtx.save();
+
+  const g = _ctrGlitch;
+
+  if (g.active && g.slices.length > 0) {
+    // Aberración cromática: desplazar canal rojo/azul levemente
+    fxCtx.globalCompositeOperation = 'source-over';
+    fxCtx.globalAlpha = 0.25;
+    fxCtx.drawImage(tc, g.jx * 0.4, g.jy * 0.3);  // desplazado cian-rojizo
+    fxCtx.globalAlpha = 1;
+
+    // Texto principal desplazado
+    fxCtx.drawImage(tc, g.jx, g.jy);
+
+    // Slices: copiar franjas del texto desplazadas
+    const textTop  = cy - fontSize2 * 0.6;
+    const textH    = fontSize2 * 1.2;
+    for (const s of g.slices) {
+      const sy = Math.floor(textTop + s.y * textH);
+      const sh = Math.max(1, Math.floor(s.h * textH));
+      // Franja desplazada
+      fxCtx.drawImage(tc, 0, sy, W, sh, s.dx, sy, W, sh);
+      // Toque de color aberración en slices
+      if (s.col) {
+        fxCtx.globalAlpha = 0.18;
+        fxCtx.fillStyle   = '#00ffee';
+        fxCtx.fillRect(s.dx, sy, W, sh);
+        fxCtx.globalAlpha = 1;
+      }
     }
-    camCtx.putImageData(frame, 0, 0);
-    // Mezclar silueta en el acumulador
-    ac.globalCompositeOperation = 'screen';
-    ac.globalAlpha = 0.45;
-    ac.drawImage(camTmp, 0, 0, W, H);
-    ac.globalAlpha = 1;
-    ac.globalCompositeOperation = 'source-over';
-  }
 
-  // ── Actualizar y dibujar partículas de fuego ──────────────────────────────
-  if (_fireParticles.length === 0) _initFire();
-  const toRemove = [];
-  for (let i = 0; i < _fireParticles.length; i++) {
-    const p = _fireParticles[i];
-    p.x    += p.vx;
-    p.y    += p.vy;
-    p.vx   *= 0.97; // fricción leve
-    p.vy   *= 0.97;
-    p.life -= p.decay;
-    if (p.life <= 0 || p.x < -20 || p.x > W+20 || p.y < -20 || p.y > H+20) {
-      toRemove.push(i);
-    } else {
-      // Dibujar en acumulador con screen blending — se acumula el calor
-      ac.globalCompositeOperation = 'screen';
-      ac.globalAlpha = p.life * 0.9;
-      ac.fillStyle   = `rgb(${p.r},${p.g},${p.b})`;
-      ac.beginPath();
-      ac.arc(p.x, p.y, p.size * p.life, 0, Math.PI*2);
-      ac.fill();
-      ac.globalAlpha = 1;
-      ac.globalCompositeOperation = 'source-over';
+    // Bloques de corrupción de memoria — estilo pantalla de inicio
+    const pal = [[0,255,238],[0,180,200],[0,255,150],[255,255,255]];
+    const nBlocks = 2 + Math.floor(Math.random() * 5);
+    for (let i = 0; i < nBlocks; i++) {
+      if (Math.random() > 0.5) continue;
+      const [r2,g2,b2] = pal[Math.floor(Math.random() * pal.length)];
+      const bw = Math.floor(W * (0.03 + Math.random() * 0.35));
+      const bh = Math.floor(1 + Math.random() * 8);
+      const bx = Math.floor(Math.random() * (W - bw));
+      const by = Math.floor(cy - fontSize2 * 0.5 + Math.random() * fontSize2);
+      fxCtx.fillStyle = `rgba(${r2},${g2},${b2},${0.3 + Math.random() * 0.55})`;
+      fxCtx.fillRect(bx, by, bw, bh);
     }
+
+    // Jolt del canvas completo ocasional
+    if (Math.random() < 0.08) {
+      const jjx = (Math.random() - 0.5) * W * 0.03;
+      const jjy = (Math.random() - 0.5) * H * 0.015;
+      fxCtx.globalAlpha = 0.4;
+      fxCtx.drawImage(fxCtx.canvas, jjx, jjy);
+      fxCtx.globalAlpha = 1;
+    }
+
+  } else {
+    // Sin glitch activo: render limpio
+    fxCtx.drawImage(tc, 0, 0);
   }
-  // Eliminar muertas y reponer
-  for (let i = toRemove.length-1; i >= 0; i--) _fireParticles.splice(toRemove[i],1);
-  const toSpawn = Math.min(12, 180 - _fireParticles.length);
-  for (let i = 0; i < toSpawn; i++) _spawnFireParticle(false);
 
-  // ── Render del acumulador al fxCanvas ────────────────────────────────────
-  fxCtx.clearRect(0, 0, W, H);
-  fxCtx.drawImage(dmAccum, 0, 0);
-
-  // Zoom radial leve — como si la explosión se expandiera
-  fxCtx.globalCompositeOperation = 'screen';
-  fxCtx.globalAlpha = 0.12;
-  fxCtx.drawImage(dmAccum, -W*0.02, -H*0.02, W*1.04, H*1.04);
-  fxCtx.globalAlpha = 1;
-  fxCtx.globalCompositeOperation = 'source-over';
-
-  // ── Glitch horizontal — como en el gif ───────────────────────────────────
-  if (Math.random() < 0.3) {
+  // ── Glitch horizontal suave de fondo (siempre activo, sutil) ─────────────
+  if (Math.random() < 0.18) {
     const gy  = Math.floor(Math.random() * H);
-    const gh  = 1 + Math.floor(Math.random() * 8);
-    const gdx = (Math.random()-0.5) * W * 0.15;
+    const gh  = 1 + Math.floor(Math.random() * 4);
+    const gdx = (Math.random() - 0.5) * W * 0.08;
     fxCtx.drawImage(fxCtx.canvas, 0, gy, W, gh, gdx, gy, W, gh);
   }
 
-  // Vignette oscura en bordes
-  const vig = fxCtx.createRadialGradient(W/2,H/2,H*0.25,W/2,H/2,H*0.85);
-  vig.addColorStop(0,'rgba(0,0,0,0)');
-  vig.addColorStop(1,'rgba(0,0,0,0.7)');
-  fxCtx.fillStyle = vig;
-  fxCtx.fillRect(0,0,W,H);
+  fxCtx.restore();
 }
 
 // ─── MODO FUERTE: DATAMOSH — súper corrupto, imagen destruida ─────────────────
@@ -994,7 +1075,12 @@ function loop() {
 
   if (now < modeUntil) {
     if (currentMode === 'leve')   drawPointCloud(fxCtx, now);
-    if (currentMode === 'medio')  drawThermal(fxCtx, now);
+    if (currentMode === 'medio') {
+      // Tapar el matrix con negro sólido — solo se ve el contador
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0, 0, W, H);
+      drawThermal(fxCtx, now);
+    }
     if (currentMode === 'fuerte') drawDatamosh(fxCtx, now);
   } else if (currentMode !== 'matrix') {
     fxCtx.clearRect(0, 0, W, H);
